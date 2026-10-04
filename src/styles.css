@@ -223,9 +223,6 @@ h3 {
   justify-self: start;
   width: min(94%, 720px);
 }
-.chat-speaker {
-  font-weight: 750;
-}
 .chat-meta {
   display: flex;
   justify-content: space-between;

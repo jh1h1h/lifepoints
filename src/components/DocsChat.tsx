@@ -426,7 +426,6 @@ export function DocsChat({ uid }: { uid: string }) {
         {entries.map((entry) => (
           <div className="chat-turn" key={entry.id}>
             <div className="chat-bubble chat-user">
-              <span className="chat-speaker">You</span>
               <p>{entry.userMessage}</p>
               <small>
                 {entry.includeFullHistory
@@ -436,7 +435,6 @@ export function DocsChat({ uid }: { uid: string }) {
             </div>
             <div className="chat-bubble chat-assistant">
               <div className="chat-meta">
-                <span className="chat-speaker">Assistant</span>
                 <span className="chat-state">{statusLabel(entry.status)}</span>
               </div>
               {entry.status === 'thinking' && <p role="status">Thinking…</p>}
