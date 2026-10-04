@@ -6,6 +6,9 @@ const reply = (input) => {
   const candidates = data.context.retrievedCandidates
   const target = candidates[0]
   const base = { schemaVersion: 1, reason: 'Suggested from the user message.' }
+  if (message.includes('diagnostic invalid action')) {
+    return { schemaVersion: 1, action: 'execute', command: 'unsupported' }
+  }
   if (message.includes('where did kevin work previously')) {
     const eventIds = [
       ...(target.historicalDeltas ?? '').matchAll(

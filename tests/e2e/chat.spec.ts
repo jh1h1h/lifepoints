@@ -17,6 +17,22 @@ async function ask(page: Page, message: string) {
   await page.getByRole('button', { name: 'Send' }).click()
 }
 
+test('explains rejected model output and exposes the raw response only when expanded', async ({
+  page,
+}) => {
+  await signIn(page)
+  await ask(page, 'Diagnostic invalid action')
+  await expect(page.getByRole('alert')).toContainText('required action format')
+  const details = page.getByText('Show error details')
+  await expect(details).toBeVisible()
+  await details.click()
+  await expect(page.getByText(/"action":"execute"/)).toBeVisible()
+  await expect(page.getByText(/DeepSeek response ID:/)).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Approve change' }),
+  ).toHaveCount(0)
+})
+
 test('chat suggestions require approval and support current, historical, and manual document workflows', async ({
   page,
 }) => {

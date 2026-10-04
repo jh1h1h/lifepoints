@@ -182,6 +182,36 @@ def test_rejected_malformed_invented_ambiguous_and_unsupported(env):
     assert len(history(db, uid, kevin)) == 1
 
 
+def test_interpretation_errors_preserve_reason_and_raw_response_for_same_request(env):
+    db, uid = env
+    kevin = create(db, uid, content="Hobbies:\nHiking\nHiking")
+    output = targeted("modify", kevin, scope="content", oldText="Hiking",
+                      newText="Biking", changeType="correction")
+    provider = Provider(output)
+    engine = ActionEngine(db, uid, provider)
+    request = {"message": "Kevin is biking", "requestId": str(uuid.uuid4()),
+               "includeFullHistory": False}
+    for _ in range(2):
+        with pytest.raises(EngineFailure) as error:
+            engine.interpret(request)
+        assert "missing or ambiguous" in str(error.value)
+        assert error.value.details["reason"] == str(error.value)
+        assert json.loads(error.value.details["rawResponse"]) == output
+        assert error.value.details["modelResponseId"] == "synthetic-response"
+    assert len(provider.calls) == 1
+    assert len(history(db, uid, kevin)) == 1
+
+
+def test_invalid_model_schema_reports_specific_field_and_raw_response(env):
+    db, uid = env
+    output = '{"schemaVersion":1,"action":"modify"}'
+    with pytest.raises(EngineFailure) as error:
+        interpret(ActionEngine(db, uid, Provider(output)), "Kevin works at Apple")
+    assert "required action format" in str(error.value)
+    assert "entityId" in str(error.value)
+    assert error.value.details["rawResponse"] == output
+
+
 def test_approval_idempotency_rejection_stale_and_edited_scope(env):
     db, uid = env
     kevin = create(db, uid, content="Employment:\nMicrosoft\nHobbies:\nHiking")

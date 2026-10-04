@@ -97,6 +97,8 @@ The chat UI is in `src/components/DocsChat.tsx`, action previews are in `src/com
 
 Local checks passed: lint, TypeScript, Prettier, 43 Vitest tests, 36 Python tests with the Firestore emulator, 9 Firestore rules tests, 20 Playwright tests with Auth/Firestore/Functions emulators (also with no Application Default Credentials), and a `/lifepoints/` production build with matching `index.html`/`404.html` fallback files. The chat was visually inspected at 375px and 1280px; automated layout checks also covered 768px and no horizontal overflow. A warning remains for the existing large Firebase-containing main bundle. The optional paid live DeepSeek evaluation and cloud deployment were not run.
 
+When an AI response cannot be validated, the chat shows the specific failed check. **Show error details** reveals the error code, request ID, and DeepSeek's raw response when one was received. The response is displayed as escaped text; it may contain excerpts of private documents, so it is not saved in browser session storage. Failed-request diagnostics are retained only in owner-scoped, server-managed Firestore request records to make retries with the same ID consistent. A failed interpretation never creates a pending proposal or changes a document.
+
 ## Backups
 
 Settings → Export JSON downloads `{ version, exportedAt, activities, tasks }`. Import validates activities and tasks before writing. By default it merges missing IDs and keeps existing records. The optional “Replace matching tasks” checkbox explicitly restores task settings from a backup while still leaving existing activity snapshots untouched. Older version-1 activity-only backups remain importable. Keep backups private because notes can contain personal information.

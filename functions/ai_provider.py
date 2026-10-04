@@ -9,9 +9,10 @@ import httpx
 
 
 class ProviderFailure(Exception):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, raw_response: str | None = None):
         super().__init__(message)
         self.code = code
+        self.raw_response = raw_response
 
 
 @dataclass(frozen=True)
@@ -76,22 +77,22 @@ class DeepSeekProvider:
                     self._sleep(min(0.4 * 2**attempt, 2))
                     continue
                 if response.status_code == 429:
-                    raise ProviderFailure("rate_limit", "DeepSeek is rate-limiting requests; try again later")
+                    raise ProviderFailure("rate_limit", "DeepSeek is rate-limiting requests; try again later", response.text[:20000])
                 if response.status_code >= 400:
-                    raise ProviderFailure("upstream", f"DeepSeek returned HTTP {response.status_code}")
+                    raise ProviderFailure("upstream", f"DeepSeek returned HTTP {response.status_code}", response.text[:20000])
                 try:
                     payload = response.json()
                     choice = payload["choices"][0]
                     if choice["finish_reason"] != "stop":
-                        raise ProviderFailure("incomplete", "DeepSeek did not finish its JSON response")
+                        raise ProviderFailure("incomplete", "DeepSeek did not finish its JSON response", response.text[:20000])
                     content = choice["message"]["content"]
                     if not isinstance(content, str) or not content.strip():
-                        raise ProviderFailure("empty", "DeepSeek returned an empty response")
+                        raise ProviderFailure("empty", "DeepSeek returned an empty response", response.text[:20000])
                     usage = payload.get("usage") or {}
                     return ModelReply(content, str(payload.get("id", "")),
                                       int(usage.get("prompt_tokens", 0)),
                                       int(usage.get("completion_tokens", 0)),
                                       round((time.monotonic() - started) * 1000))
                 except (ValueError, KeyError, IndexError, TypeError) as exc:
-                    raise ProviderFailure("malformed", "DeepSeek returned an invalid response envelope") from exc
+                    raise ProviderFailure("malformed", "DeepSeek returned an invalid response envelope", response.text[:20000]) from exc
         raise ProviderFailure("unavailable", "DeepSeek is unavailable")

@@ -184,6 +184,39 @@ describe('Docs interface', () => {
     expect(screen.getByLabelText('Message')).toHaveValue('Kevin works at Apple')
     expect(docsService.approveAction).not.toHaveBeenCalled()
   })
+  it('shows the precise validation reason and reveals raw model output on request', async () => {
+    const failure = Object.assign(
+      new Error('Original text is missing or ambiguous'),
+      {
+        code: 'functions/failed-precondition',
+        details: {
+          reason: 'Original text is missing or ambiguous',
+          rawResponse: '<script>alert("unsafe")</script>',
+          requestId: 'request-diagnostic',
+          modelResponseId: 'deepseek-diagnostic',
+        },
+      },
+    )
+    vi.mocked(docsService.interpretMessage).mockRejectedValueOnce(failure)
+    render(<Docs path="/docs" uid="test-user" />)
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Kevin changed jobs' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Original text is missing or ambiguous',
+    )
+    expect(
+      screen.queryByText('<script>alert("unsafe")</script>'),
+    ).not.toBeVisible()
+    fireEvent.click(screen.getByText('Show error details'))
+    expect(screen.getByText('<script>alert("unsafe")</script>')).toBeVisible()
+    expect(screen.getByText('request-diagnostic')).toBeVisible()
+    expect(docsService.approveAction).not.toHaveBeenCalled()
+    expect(
+      sessionStorage.getItem('lifepoints-docs-chat:test-user'),
+    ).not.toContain('rawResponse')
+  })
   it('offers a read-only query and an explicit approval for proposed changes', async () => {
     render(<Docs path="/docs" uid="test-user" />)
     fireEvent.change(screen.getByLabelText('Message'), {

@@ -35,7 +35,7 @@ def _call(operation, data):
     except EngineFailure as exc:
         code = next((item for item in https_fn.FunctionsErrorCode if item.value == exc.code),
                     https_fn.FunctionsErrorCode.INTERNAL)
-        raise https_fn.HttpsError(code, str(exc)) from exc
+        raise https_fn.HttpsError(code, str(exc), exc.details) from exc
 
 
 @https_fn.on_call()

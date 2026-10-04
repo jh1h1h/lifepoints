@@ -20,9 +20,20 @@ from docs_service import ID_PATTERN
 
 
 class EngineFailure(Exception):
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, details: dict | None = None):
         super().__init__(message)
         self.code = code
+        self.details = details
+
+
+def _validation_reason(exc: ValidationError | ValueError) -> str:
+    if isinstance(exc, ValidationError):
+        issues = []
+        for item in exc.errors(include_input=False, include_url=False)[:3]:
+            path = ".".join(str(part) for part in item["loc"])
+            issues.append(f"{path}: {item['msg']}" if path else item["msg"])
+        return "Model response did not match the required action format: " + "; ".join(issues)
+    return f"Model response could not be parsed: {exc}"
 
 
 def _id(value, label):
@@ -101,7 +112,7 @@ class ActionEngine:
             if previous["status"] == "completed":
                 return reference, previous["response"]
             if previous["status"] == "failed":
-                raise EngineFailure(previous["errorCode"], previous["errorMessage"])
+                raise EngineFailure(previous["errorCode"], previous["errorMessage"], previous.get("errorDetails"))
             raise EngineFailure("unavailable", "This request is still processing; check its request ID before resending")
 
     def _finish(self, request_ref, response: dict, conversation: dict | None = None):
@@ -149,23 +160,32 @@ class ActionEngine:
         request_ref, saved = self._start_request(request_id, fingerprint)
         if saved is not None:
             return saved
+        diagnostics: dict[str, str] = {}
         try:
-            response, conversation = self._interpret_new(message, include_full_history, conversation_id, request_id, selected_id)
+            response, conversation = self._interpret_new(message, include_full_history, conversation_id, request_id, selected_id, diagnostics)
             return self._finish(request_ref, response, conversation)
         except (EngineFailure, ContextFailure, ProviderFailure) as exc:
             code = exc.code if isinstance(exc, (EngineFailure, ContextFailure)) else {
                 "configuration": "failed-precondition", "timeout": "deadline-exceeded",
                 "rate_limit": "resource-exhausted"}.get(exc.code, "unavailable")
-            request_ref.update({"status": "failed", "errorCode": code, "errorMessage": str(exc), "completedAt": _utcnow()})
-            raise EngineFailure(code, str(exc)) from exc
+            details = {"reason": str(exc), "requestId": request_id, **diagnostics}
+            if isinstance(exc, ProviderFailure) and exc.raw_response is not None:
+                details["rawResponse"] = exc.raw_response
+            if isinstance(exc, EngineFailure) and exc.details:
+                details.update(exc.details)
+            request_ref.update({"status": "failed", "errorCode": code, "errorMessage": str(exc),
+                                "errorDetails": details, "completedAt": _utcnow()})
+            raise EngineFailure(code, str(exc), details) from exc
         except (ValidationError, ValueError) as exc:
+            reason = _validation_reason(exc)
+            details = {"reason": reason, "requestId": request_id, **diagnostics}
             request_ref.update({"status": "failed", "errorCode": "failed-precondition",
-                                "errorMessage": "DeepSeek returned an unsupported or malformed action", "completedAt": _utcnow()})
-            raise EngineFailure("failed-precondition", "DeepSeek returned an unsupported or malformed action") from exc
+                                "errorMessage": reason, "errorDetails": details, "completedAt": _utcnow()})
+            raise EngineFailure("failed-precondition", reason, details) from exc
         except Aborted as exc:
             raise EngineFailure("aborted", "A concurrent edit changed this request; try again") from exc
 
-    def _interpret_new(self, message: str, include_full_history: bool, conversation_id: str | None, request_id: str, selected_id: str | None):
+    def _interpret_new(self, message: str, include_full_history: bool, conversation_id: str | None, request_id: str, selected_id: str | None, diagnostics: dict[str, str]):
         prior = self._conversation(conversation_id)
         if selected_id and (not prior or selected_id not in prior["candidateIds"]):
             raise EngineFailure("permission-denied", "Selected document was not a clarification choice")
@@ -197,6 +217,9 @@ class ActionEngine:
                        "context": json.loads(context.context_text)}
         reply = self.provider.complete([{"role": "system", "content": SYSTEM_PROMPT},
                                         {"role": "user", "content": json.dumps(prompt_data, ensure_ascii=False)}], request_id)
+        diagnostics["rawResponse"] = reply.content
+        if reply.response_id:
+            diagnostics["modelResponseId"] = reply.response_id
         action = parse_action(reply.content)
         allow_duplicate = bool(prior and re.search(r"(?i)\b(create another|new one|another copy)\b", message))
         if isinstance(action, CreateAction) and not allow_duplicate:

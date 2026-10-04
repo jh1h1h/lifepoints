@@ -945,6 +945,29 @@ h3 {
   color: #9a2730;
   margin-top: 15px;
 }
+.ai-error-details {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #d9ddd7;
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+.ai-error-details summary {
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  font-weight: 600;
+}
+.ai-error-details pre {
+  max-height: 300px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f4f5f2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .status-area {
   position: fixed;
   bottom: 20px;

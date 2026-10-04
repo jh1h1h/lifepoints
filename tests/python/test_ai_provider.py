@@ -40,6 +40,7 @@ def test_timeout_is_not_retried():
     with pytest.raises(ProviderFailure) as error:
         provider.complete([{"role": "user", "content": "hi"}], "req-12345678")
     assert error.value.code == "timeout" and len(calls) == 1
+    assert error.value.raw_response is None
 
 
 def test_rate_limit_retries_are_bounded(monkeypatch):
@@ -63,8 +64,9 @@ def test_rate_limit_retries_are_bounded(monkeypatch):
 ])
 def test_incomplete_or_empty_response_fails(response):
     provider = DeepSeekProvider("synthetic-secret", httpx.MockTransport(lambda _: httpx.Response(200, json=response)))
-    with pytest.raises(ProviderFailure):
+    with pytest.raises(ProviderFailure) as error:
         provider.complete([{"role": "user", "content": "hi"}], "req-12345678")
+    assert json.loads(error.value.raw_response) == response
 
 
 @pytest.mark.parametrize("value", [

@@ -43,6 +43,7 @@ interface ChatEntry {
   failedDecision?: 'approve' | 'reject'
   failedChecks?: number
   error?: string
+  errorDetails?: AiErrorDetails
   approved?: {
     entityId: string
     revision: number
@@ -53,6 +54,32 @@ interface ChatEntry {
   historyCount?: number
   refreshError?: string
   sources?: Source[]
+}
+
+interface AiErrorDetails {
+  reason?: string
+  requestId?: string
+  modelResponseId?: string
+  rawResponse?: string
+  code?: string
+}
+
+function errorDetails(error: unknown): AiErrorDetails {
+  if (typeof error !== 'object' || error === null) return {}
+  const candidate = error as { code?: unknown; details?: unknown }
+  const details =
+    typeof candidate.details === 'object' && candidate.details !== null
+      ? (candidate.details as Record<string, unknown>)
+      : {}
+  const stringField = (key: string) =>
+    typeof details[key] === 'string' ? (details[key] as string) : undefined
+  return {
+    reason: stringField('reason'),
+    requestId: stringField('requestId'),
+    modelResponseId: stringField('modelResponseId'),
+    rawResponse: stringField('rawResponse'),
+    code: typeof candidate.code === 'string' ? candidate.code : undefined,
+  }
 }
 
 interface ChatSession {
@@ -133,6 +160,8 @@ function staleError(error: unknown): boolean {
 }
 
 function aiError(error: unknown): string {
+  const details = errorDetails(error)
+  if (details.reason) return details.reason
   const text =
     error instanceof Error
       ? `${'code' in error ? String(error.code) : ''} ${error.message}`
@@ -142,7 +171,9 @@ function aiError(error: unknown): string {
   if (/resource-exhausted|rate.limit|budget/i.test(text))
     return 'The assistant is at its current request or context limit. Try again later or use a shorter message.'
   if (/failed-precondition|invalid response|malformed|unsupported/i.test(text))
-    return 'The assistant could not make a safe suggestion. Try rephrasing the message.'
+    return error instanceof Error && error.message.trim()
+      ? error.message
+      : 'The proposed action could not be validated.'
   if (/\binternal\b/i.test(text))
     return 'The Docs assistant is temporarily unavailable. Check your connection and try again.'
   if (/unauthenticated|permission-denied/i.test(text))
@@ -173,7 +204,17 @@ export function DocsChat({ uid }: { uid: string }) {
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(sessionKey(uid), JSON.stringify(session))
+      sessionStorage.setItem(
+        sessionKey(uid),
+        JSON.stringify({
+          ...session,
+          entries: session.entries.map((entry) => {
+            const saved = { ...entry }
+            delete saved.errorDetails
+            return saved
+          }),
+        }),
+      )
     } catch {
       /* Private browsing may deny storage. */
     }
@@ -195,7 +236,11 @@ export function DocsChat({ uid }: { uid: string }) {
     if (busyRef.current) return
     busyRef.current = true
     setBusy(true)
-    patchEntry(entry.id, { status: 'thinking', error: undefined })
+    patchEntry(entry.id, {
+      status: 'thinking',
+      error: undefined,
+      errorDetails: undefined,
+    })
     try {
       const result = await docsService.interpretMessage(
         entry.userMessage,
@@ -253,6 +298,7 @@ export function DocsChat({ uid }: { uid: string }) {
       patchEntry(entry.id, {
         status: 'failed',
         error: aiError(error),
+        errorDetails: errorDetails(error),
         failedDecision: undefined,
         failedChecks: (entry.failedChecks ?? 0) + 1,
       })
@@ -499,6 +545,49 @@ export function DocsChat({ uid }: { uid: string }) {
                 <p className="error" role="alert">
                   {entry.error}
                 </p>
+              )}
+              {entry.error && entry.errorDetails && (
+                <details className="ai-error-details">
+                  <summary>Show error details</summary>
+                  <p>
+                    <strong>Reason:</strong>{' '}
+                    {entry.errorDetails.reason ?? entry.error}
+                  </p>
+                  {entry.errorDetails.code && (
+                    <p>
+                      <strong>Code:</strong> {entry.errorDetails.code}
+                    </p>
+                  )}
+                  {entry.errorDetails.requestId && (
+                    <p>
+                      <strong>Request ID:</strong>{' '}
+                      {entry.errorDetails.requestId}
+                    </p>
+                  )}
+                  {entry.errorDetails.modelResponseId && (
+                    <p>
+                      <strong>DeepSeek response ID:</strong>{' '}
+                      {entry.errorDetails.modelResponseId}
+                    </p>
+                  )}
+                  <p>
+                    <strong>DeepSeek raw response:</strong>
+                  </p>
+                  {entry.errorDetails.rawResponse !== undefined ? (
+                    <pre>
+                      {entry.errorDetails.rawResponse || '(empty response)'}
+                    </pre>
+                  ) : (
+                    <p>
+                      No model response was received or available for this
+                      error.
+                    </p>
+                  )}
+                  <p className="muted">
+                    Raw responses may contain excerpts from your documents.
+                    These details are not saved in this browser session.
+                  </p>
+                </details>
               )}
               {entry.status === 'failed' && !entry.result && (
                 <div className="docs-actions">
