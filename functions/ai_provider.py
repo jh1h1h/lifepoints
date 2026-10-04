@@ -54,7 +54,9 @@ class DeepSeekProvider:
                 "response_format": {"type": "json_object"}, "max_tokens": self.max_tokens,
                 "thinking": {"type": "disabled"}, "stream": False}
         started = time.monotonic()
-        with httpx.Client(base_url="https://api.deepseek.com", timeout=self.timeout,
+        base_url = (os.environ.get("DEEPSEEK_API_BASE_URL", "https://api.deepseek.com")
+                    if os.environ.get("FIRESTORE_EMULATOR_HOST") else "https://api.deepseek.com")
+        with httpx.Client(base_url=base_url, timeout=self.timeout,
                           transport=self._transport) as client:
             for attempt in range(self.max_retries + 1):
                 try:

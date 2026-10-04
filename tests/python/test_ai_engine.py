@@ -151,6 +151,21 @@ def test_example_i_clarification_and_followup(env):
     assert content(db, uid, tan) == "Working at Microsoft"
 
 
+def test_structured_choice_resolves_duplicate_identical_names(env):
+    db, uid = env
+    first = create(db, uid, "Kevin", "Working at Microsoft")
+    second = create(db, uid, "Kevin", "Working at Microsoft")
+    engine = ActionEngine(db, uid, Provider(targeted("modify", second, scope="content", oldText="Working at Microsoft",
+                                              newText="Changed jobs; current employer unknown", changeType="new_information")))
+    clarification = interpret(engine, "Kevin changed jobs")
+    assert clarification["kind"] == "clarify" and len(clarification["choices"]) == 2
+    chosen = interpret(engine, "This Kevin", conversationId=clarification["conversationId"], selectedEntityId=second)
+    assert chosen["kind"] == "proposal" and chosen["proposal"]["entityId"] == second
+    assert content(db, uid, first) == "Working at Microsoft"
+    with pytest.raises(EngineFailure):
+        interpret(engine, "Kevin", conversationId=clarification["conversationId"], selectedEntityId="invented123")
+
+
 def test_rejected_malformed_invented_ambiguous_and_unsupported(env):
     db, uid = env
     kevin = create(db, uid, content="Hobbies:\nHiking\nHiking")
@@ -320,6 +335,22 @@ def test_edited_delete_cannot_become_replacement(env):
         approve(engine, proposal, replacementText="Running")
     assert error.value.code == "invalid-argument"
     assert content(db, uid, kevin) == "Hiking and swimming"
+
+
+def test_create_name_can_be_edited_but_existing_target_name_cannot(env):
+    db, uid = env
+    engine = ActionEngine(db, uid, Provider(action("create", entityType="friend", name="Kevin", content="Hi")))
+    proposal = interpret(engine, "Create Kevin")
+    approved = approve(engine, proposal, entityName="Kevin Tan")
+    entity = handle(db, uid, {"action": "get", "entityId": approved["entityId"]})["entity"]
+    assert entity["name"] == "Kevin Tan" and entity["normalizedName"] == "kevin tan"
+    assert history(db, uid, approved["entityId"])[0]["afterName"] == "Kevin Tan"
+    with pytest.raises(EngineFailure):
+        approve(engine, proposal, entityName="Different")
+    add_engine = ActionEngine(db, uid, Provider(targeted("add", approved["entityId"], scope="content", newText="New")))
+    add_proposal = interpret(add_engine, "Add new information to Kevin Tan")
+    with pytest.raises(EngineFailure):
+        approve(add_engine, add_proposal, entityName="Other")
 
 
 def test_whole_document_rewrite_is_rejected_when_only_one_fact_changes(env):

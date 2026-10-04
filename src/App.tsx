@@ -165,7 +165,7 @@ export default function App() {
             </main>
           }
         >
-          <Docs path={route} />
+          <Docs path={route} uid={user.uid} />
         </Suspense>
       ) : loading || taskState.loading ? (
         <main className="container page">

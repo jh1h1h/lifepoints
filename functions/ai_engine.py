@@ -139,13 +139,18 @@ class ActionEngine:
         conversation_id = request.get("conversationId")
         if conversation_id is not None:
             _id(conversation_id, "conversationId")
+        selected_id = request.get("selectedEntityId")
+        if selected_id is not None:
+            _id(selected_id, "selectedEntityId")
+            if conversation_id is None:
+                raise EngineFailure("invalid-argument", "A selected entity requires a clarification conversation")
         fingerprint = hashlib.sha256(json.dumps({"message": message, "full": include_full_history,
-                                                 "conversationId": conversation_id}, sort_keys=True).encode()).hexdigest()
+                                                 "conversationId": conversation_id, "selectedEntityId": selected_id}, sort_keys=True).encode()).hexdigest()
         request_ref, saved = self._start_request(request_id, fingerprint)
         if saved is not None:
             return saved
         try:
-            response, conversation = self._interpret_new(message, include_full_history, conversation_id, request_id)
+            response, conversation = self._interpret_new(message, include_full_history, conversation_id, request_id, selected_id)
             return self._finish(request_ref, response, conversation)
         except (EngineFailure, ContextFailure, ProviderFailure) as exc:
             code = exc.code if isinstance(exc, (EngineFailure, ContextFailure)) else {
@@ -160,10 +165,12 @@ class ActionEngine:
         except Aborted as exc:
             raise EngineFailure("aborted", "A concurrent edit changed this request; try again") from exc
 
-    def _interpret_new(self, message: str, include_full_history: bool, conversation_id: str | None, request_id: str):
+    def _interpret_new(self, message: str, include_full_history: bool, conversation_id: str | None, request_id: str, selected_id: str | None):
         prior = self._conversation(conversation_id)
+        if selected_id and (not prior or selected_id not in prior["candidateIds"]):
+            raise EngineFailure("permission-denied", "Selected document was not a clarification choice")
         original = prior["originalMessage"] if prior else message
-        allowed_ids = prior["candidateIds"] if prior else None
+        allowed_ids = [selected_id] if selected_id else (prior["candidateIds"] if prior else None)
         context = ContextRetriever(self.db, self.uid).retrieve(message, include_full_history, allowed_ids)
         candidates = context.candidates
         if len(candidates) > 1:
@@ -184,7 +191,8 @@ class ActionEngine:
             if not any(re.search(r"(?i)\bbirthday\b", item["content"]) for item in candidates):
                 return ({"kind": "query", "action": "query", "answer": "The birthday is not recorded in the available document.",
                          "references": [_reference(item) for item in candidates], "requestId": request_id}, None)
-        conversation_text = (f"Original user message: {original}\nClarification: {message}" if prior else message)
+        conversation_text = (f"Original user message: {original}\nClarification: {message}"
+                             + (f"\nSelected entity ID: {selected_id}" if selected_id else "")) if prior else message
         prompt_data = {"userMessage": conversation_text, "includeFullHistory": include_full_history,
                        "context": json.loads(context.context_text)}
         reply = self.provider.complete([{"role": "system", "content": SYSTEM_PROMPT},
@@ -231,6 +239,7 @@ class ActionEngine:
                   "status": "pending", "promptVersion": PROMPT_VERSION}
         response = {"kind": "proposal", "action": action.action, "proposalId": proposal_ref.id,
                     "requestId": request_id, "expiresAt": expires.isoformat(), "proposal": proposal,
+                    "targetName": action.name if isinstance(action, CreateAction) else next(item["name"] for item in candidates if item["id"] == action.entityId),
                     "preview": {"before": before, "after": after}, "usage": usage,
                     "_storedProposal": stored}
         return response, None
@@ -297,6 +306,9 @@ class ActionEngine:
         replacement = request.get("replacementText")
         if replacement is not None and (not isinstance(replacement, str) or len(replacement) > 10000):
             raise EngineFailure("invalid-argument", "Replacement text is invalid or too long")
+        edited_name = request.get("entityName")
+        if edited_name is not None and (not isinstance(edited_name, str) or not edited_name.strip() or len(edited_name) > 120):
+            raise EngineFailure("invalid-argument", "Entity name must contain 1–120 characters")
         proposal_ref = self.user.collection("aiProposals").document(proposal_id)
         approval_ref = self.user.collection("aiApprovals").document(approval_id)
         tx = self.db.transaction()
@@ -306,7 +318,8 @@ class ActionEngine:
             previous = approval_ref.get(transaction=transaction)
             if previous.exists:
                 data = previous.to_dict()
-                if data["proposalId"] != proposal_id or data.get("replacementText") != replacement:
+                if (data["proposalId"] != proposal_id or data.get("replacementText") != replacement
+                        or data.get("entityName") != edited_name):
                     raise EngineFailure("already-exists", "Approval request ID was reused for a different approval")
                 return {**data["result"], "alreadyProcessed": True}
             snapshot = proposal_ref.get(transaction=transaction)
@@ -319,6 +332,8 @@ class ActionEngine:
                 transaction.update(proposal_ref, {"status": "expired"})
                 return {"expired": True}
             action = parse_action(json.dumps(proposal["action"]))
+            if edited_name is not None and not isinstance(action, CreateAction):
+                raise EngineFailure("invalid-argument", "Only creation proposals can edit the entity name")
             entity_ref = self.docs.document(proposal["entityId"])
             current = None if isinstance(action, CreateAction) else entity_ref.get(transaction=transaction)
             if current is not None and (not current.exists or current.to_dict()["deleted"]):
@@ -333,8 +348,9 @@ class ActionEngine:
                 if len(after) > 200000:
                     raise EngineFailure("invalid-argument", "Initial document is too long")
                 now = _utcnow()
-                entity = {"entityType": action.entityType, "name": action.name.strip(),
-                          "normalizedName": action.name.casefold().strip(), "aliases": [],
+                name = (edited_name if edited_name is not None else action.name).strip()
+                entity = {"entityType": action.entityType, "name": name,
+                          "normalizedName": name.casefold(), "aliases": [],
                           "content": after, "revision": 1, "deleted": False,
                           "createdAt": now, "updatedAt": now}
                 base_revision, new_revision = 0, 1
@@ -366,11 +382,13 @@ class ActionEngine:
                      "afterName": entity["name"], "beforeAliases": [] if current is None else entity["aliases"],
                      "afterAliases": entity["aliases"]}
             transaction.create(entity_ref.collection("edits").document(approval_id), event)
-            result = {"entityId": entity_ref.id, "revision": new_revision, "status": "approved"}
+            result = {"entityId": entity_ref.id, "entityType": entity["entityType"],
+                      "name": entity["name"], "revision": new_revision, "status": "approved"}
             transaction.update(proposal_ref, {"status": "approved", "approvedAt": now,
                                               "approvalRequestId": approval_id, "result": result})
             transaction.create(approval_ref, {"proposalId": proposal_id,
-                                               "replacementText": replacement, "result": result, "createdAt": now})
+                                               "replacementText": replacement, "entityName": edited_name,
+                                               "result": result, "createdAt": now})
             return result
 
         try:

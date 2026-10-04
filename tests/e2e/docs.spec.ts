@@ -17,7 +17,7 @@ test('Docs requires Google sign-in outside the emulator test session', async ({
     page.getByRole('button', { name: 'Continue with Google' }),
   ).toBeVisible()
   await expect(
-    page.getByRole('heading', { name: 'Your documents' }),
+    page.getByRole('heading', { name: 'What would you like to remember?' }),
   ).toHaveCount(0)
 })
 
@@ -112,7 +112,7 @@ test('Points and Docs navigation remains usable at mobile and desktop widths', a
     await expect(page.getByLabel('Weekly score 0 out of 100')).toBeVisible()
     await page.getByRole('link', { name: 'Docs', exact: true }).click()
     await expect(
-      page.getByRole('heading', { name: 'Your documents' }),
+      page.getByRole('heading', { name: 'What would you like to remember?' }),
     ).toBeVisible()
     await expect(page.getByLabel('Message')).toBeVisible()
     expect(

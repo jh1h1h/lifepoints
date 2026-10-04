@@ -51,8 +51,60 @@ export interface AiChoice {
   name: string
 }
 
+export interface AiReference {
+  entityId: string
+  revision: number
+  eventIds: string[]
+}
+
+interface AiActionBase {
+  schemaVersion: 1
+  reason: string
+  changeType: ChangeType
+}
+
+export type AiMutation =
+  | (AiActionBase & {
+      action: 'create'
+      entityType: EntityType
+      name: string
+      content: string
+    })
+  | (AiActionBase & {
+      action: 'add'
+      entityType: EntityType
+      entityId: string
+      expectedRevision: number
+      scope: 'content'
+      newText: string
+      afterText: string | null
+    })
+  | (AiActionBase & {
+      action: 'modify'
+      entityType: EntityType
+      entityId: string
+      expectedRevision: number
+      scope: 'content'
+      oldText: string
+      newText: string
+    })
+  | (AiActionBase & {
+      action: 'delete'
+      entityType: EntityType
+      entityId: string
+      expectedRevision: number
+      scope: 'content' | 'entity'
+      oldText: string | null
+    })
+
 export type AiResult =
-  | { kind: 'query'; action: 'query'; answer: string; requestId: string }
+  | {
+      kind: 'query'
+      action: 'query'
+      answer: string
+      requestId: string
+      references: AiReference[]
+    }
   | {
       kind: 'clarify'
       action: 'clarify'
@@ -66,13 +118,8 @@ export type AiResult =
       proposalId: string
       requestId: string
       expiresAt: string
-      proposal: {
-        scope?: 'content' | 'entity'
-        newText?: string
-        content?: string
-        reason?: string
-        changeType?: ChangeType
-      }
+      targetName: string
+      proposal: AiMutation
       preview: { before: string; after: string }
     }
 
@@ -105,6 +152,7 @@ export const docsService = {
     includeFullHistory: boolean,
     conversationId?: string,
     requestId: string = crypto.randomUUID(),
+    selectedEntityId?: string,
   ) {
     if (!functions) throw new Error('Firebase is not configured.')
     const callable = httpsCallable<Record<string, unknown>, AiResult>(
@@ -118,6 +166,7 @@ export const docsService = {
       message,
       includeFullHistory,
       ...(conversationId ? { conversationId } : {}),
+      ...(selectedEntityId ? { selectedEntityId } : {}),
       requestId,
     })
     return result.data
@@ -126,15 +175,23 @@ export const docsService = {
     proposalId: string,
     replacementText?: string,
     approvalRequestId: string = crypto.randomUUID(),
+    entityName?: string,
   ) {
     if (!functions) throw new Error('Firebase is not configured.')
     const callable = httpsCallable<
       Record<string, unknown>,
-      { entityId: string; revision: number; status: string }
+      {
+        entityId: string
+        entityType: EntityType
+        name: string
+        revision: number
+        status: string
+      }
     >(functions, 'approveAction')
     const result = await callable({
       proposalId,
       ...(replacementText !== undefined ? { replacementText } : {}),
+      ...(entityName !== undefined ? { entityName } : {}),
       approvalRequestId,
     })
     return result.data

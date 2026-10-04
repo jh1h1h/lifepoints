@@ -60,7 +60,8 @@ const edit: DocEdit = {
 }
 
 beforeEach(() => {
-  vi.mocked(docsService.interpretMessage).mockClear()
+  sessionStorage.clear()
+  vi.mocked(docsService.interpretMessage).mockReset()
   vi.mocked(docsService.approveAction).mockClear()
   vi.mocked(docsService.rejectAction).mockClear()
   vi.mocked(docsService.list).mockResolvedValue([entity])
@@ -76,9 +77,12 @@ beforeEach(() => {
     action: 'query',
     answer: 'Apple',
     requestId: 'request123',
+    references: [],
   })
   vi.mocked(docsService.approveAction).mockResolvedValue({
     entityId: entity.id,
+    entityType: 'friend',
+    name: 'Kevin',
     revision: 2,
     status: 'approved',
   })
@@ -87,23 +91,101 @@ beforeEach(() => {
 })
 
 describe('Docs interface', () => {
-  it('reuses the same interpretation ID after a failed attempt', async () => {
-    vi.mocked(docsService.interpretMessage).mockRejectedValueOnce(
-      new Error('timeout'),
-    )
-    render(<Docs path="/docs" />)
+  it('sends the selected history mode and retains the choice during this chat session', async () => {
+    render(<Docs path="/docs" uid="test-user" />)
+    const checkbox = screen.getByRole('checkbox', {
+      name: 'Include full history',
+    })
+    expect(checkbox).not.toBeChecked()
+    fireEvent.click(checkbox)
     fireEvent.change(screen.getByLabelText('Message'), {
       target: { value: 'Where does Kevin work?' },
     })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('timeout')
+    await screen.findByText('Apple')
+    expect(docsService.interpretMessage).toHaveBeenCalledWith(
+      'Where does Kevin work?',
+      true,
+      undefined,
+      expect.any(String),
+      undefined,
+    )
+    expect(screen.getByText('Full history included')).toBeVisible()
+    fireEvent.click(checkbox)
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'What is next?' },
+    })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() =>
+      expect(docsService.interpretMessage).toHaveBeenLastCalledWith(
+        'What is next?',
+        false,
+        undefined,
+        expect.any(String),
+        undefined,
+      ),
+    )
+  })
+
+  it('renders clarification choices and sends a selected candidate with conversation context', async () => {
+    vi.mocked(docsService.interpretMessage).mockResolvedValueOnce({
+      kind: 'clarify',
+      action: 'clarify',
+      question: 'Which Kevin?',
+      conversationId: 'conversation123',
+      choices: [{ entityId: entity.id, entityType: 'friend', name: 'Kevin' }],
+    })
+    render(<Docs path="/docs" uid="test-user" />)
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Kevin changed jobs' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByText('Which Kevin?')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: /Kevin · friend/ }))
+    await waitFor(() =>
+      expect(docsService.interpretMessage).toHaveBeenLastCalledWith(
+        'Kevin',
+        false,
+        'conversation123',
+        expect.any(String),
+        entity.id,
+      ),
+    )
+    expect(docsService.approveAction).not.toHaveBeenCalled()
+  })
+
+  it('reuses the same interpretation ID after a failed attempt', async () => {
+    vi.mocked(docsService.interpretMessage).mockRejectedValueOnce(
+      new Error('timeout'),
+    )
+    render(<Docs path="/docs" uid="test-user" />)
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Where does Kevin work?' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('timed out')
+    fireEvent.click(screen.getByRole('button', { name: 'Retry this request' }))
     await screen.findByText('Apple')
     const calls = vi.mocked(docsService.interpretMessage).mock.calls
     expect(calls[0][3]).toBe(calls[1][3])
   })
+  it('keeps the draft and explains backend failures without claiming a write', async () => {
+    vi.mocked(docsService.interpretMessage).mockRejectedValueOnce(
+      new Error('internal [0]'),
+    )
+    render(<Docs path="/docs" uid="test-user" />)
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Kevin works at Apple' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'temporarily unavailable',
+    )
+    expect(screen.getByLabelText('Message')).toHaveValue('Kevin works at Apple')
+    expect(docsService.approveAction).not.toHaveBeenCalled()
+  })
   it('offers a read-only query and an explicit approval for proposed changes', async () => {
-    render(<Docs path="/docs" />)
+    render(<Docs path="/docs" uid="test-user" />)
     fireEvent.change(screen.getByLabelText('Message'), {
       target: { value: 'Where does Kevin work?' },
     })
@@ -114,6 +196,7 @@ describe('Docs interface', () => {
       false,
       undefined,
       expect.any(String),
+      undefined,
     )
     expect(docsService.approveAction).not.toHaveBeenCalled()
     vi.mocked(docsService.interpretMessage).mockResolvedValueOnce({
@@ -122,7 +205,19 @@ describe('Docs interface', () => {
       proposalId: 'proposal123',
       requestId: 'request124',
       expiresAt: new Date().toISOString(),
-      proposal: { newText: 'Google', changeType: 'new_information' },
+      targetName: 'Kevin',
+      proposal: {
+        schemaVersion: 1,
+        action: 'modify',
+        entityType: 'friend',
+        entityId: entity.id,
+        expectedRevision: 1,
+        scope: 'content',
+        oldText: 'Microsoft',
+        newText: 'Google',
+        changeType: 'new_information',
+        reason: 'Changed jobs.',
+      },
       preview: { before: 'Microsoft', after: 'Google' },
     })
     fireEvent.change(screen.getByLabelText('Message'), {
@@ -130,33 +225,113 @@ describe('Docs interface', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Send' }))
     expect(
-      await screen.findByRole('heading', { name: 'Review modify suggestion' }),
+      await screen.findByRole('heading', { name: 'Friend: Kevin' }),
     ).toBeVisible()
     expect(docsService.approveAction).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByRole('button', { name: 'Approve' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve change' }))
     await waitFor(() =>
       expect(docsService.approveAction).toHaveBeenCalledWith(
         'proposal123',
         'Google',
         expect.any(String),
+        undefined,
+      ),
+    )
+  })
+  it('does not submit duplicate approval calls on repeated clicks', async () => {
+    vi.mocked(docsService.interpretMessage).mockResolvedValueOnce({
+      kind: 'proposal',
+      action: 'create',
+      proposalId: 'proposal-double',
+      requestId: 'request-double',
+      expiresAt: new Date().toISOString(),
+      targetName: 'Kevin',
+      proposal: {
+        schemaVersion: 1,
+        action: 'create',
+        entityType: 'friend',
+        name: 'Kevin',
+        content: 'Hiking',
+        changeType: 'new_information',
+        reason: '',
+      },
+      preview: { before: '', after: 'Hiking' },
+    })
+    vi.mocked(docsService.approveAction).mockImplementationOnce(
+      () => new Promise(() => {}),
+    )
+    render(<Docs path="/docs" uid="test-user" />)
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Create Kevin' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    const approve = await screen.findByRole('button', {
+      name: 'Approve change',
+    })
+    fireEvent.click(approve)
+    fireEvent.click(approve)
+    expect(docsService.approveAction).toHaveBeenCalledOnce()
+    expect(screen.queryByText(/Saved Kevin/)).not.toBeInTheDocument()
+  })
+  it('submits an edited creation name and content for server validation', async () => {
+    vi.mocked(docsService.interpretMessage).mockResolvedValueOnce({
+      kind: 'proposal',
+      action: 'create',
+      proposalId: 'proposal-edit',
+      requestId: 'request-edit',
+      expiresAt: new Date().toISOString(),
+      targetName: 'Kevin',
+      proposal: {
+        schemaVersion: 1,
+        action: 'create',
+        entityType: 'friend',
+        name: 'Kevin',
+        content: 'Hiking',
+        changeType: 'new_information',
+        reason: '',
+      },
+      preview: { before: '', after: 'Hiking' },
+    })
+    render(<Docs path="/docs" uid="test-user" />)
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Create Kevin' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Edit proposal' }),
+    )
+    fireEvent.change(screen.getByLabelText('Entity name'), {
+      target: { value: 'Kevin Tan' },
+    })
+    fireEvent.change(screen.getByLabelText('Initial content'), {
+      target: { value: 'Hiking and photography' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save edit' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Approve change' }))
+    await waitFor(() =>
+      expect(docsService.approveAction).toHaveBeenCalledWith(
+        'proposal-edit',
+        'Hiking and photography',
+        expect.any(String),
+        'Kevin Tan',
       ),
     )
   })
   it('renders overview and both collections', async () => {
-    const { rerender } = render(<Docs path="/docs" />)
+    const { rerender } = render(<Docs path="/docs" uid="test-user" />)
     expect(screen.getByRole('link', { name: 'Friends' })).toBeVisible()
     expect(screen.getByRole('link', { name: 'Projects' })).toBeVisible()
-    rerender(<Docs path="/docs/friends" />)
+    rerender(<Docs path="/docs/friends" uid="test-user" />)
     expect(await screen.findByRole('link', { name: 'Kevin' })).toBeVisible()
     fireEvent.change(screen.getByLabelText('Search friends and aliases'), {
       target: { value: 'Kev' },
     })
     expect(screen.getByRole('link', { name: 'Kevin' })).toBeVisible()
-    rerender(<Docs path="/docs/projects" />)
+    rerender(<Docs path="/docs/projects" uid="test-user" />)
     expect(screen.getByRole('heading', { name: 'Projects' })).toBeVisible()
   })
   it('creates a consolidated document', async () => {
-    render(<Docs path="/docs/projects" />)
+    render(<Docs path="/docs/projects" uid="test-user" />)
     fireEvent.click(screen.getByRole('button', { name: 'New project' }))
     const form = screen.getByRole('form', { name: 'New project' })
     fireEvent.change(form.querySelector('input')!, {
@@ -178,7 +353,7 @@ describe('Docs interface', () => {
     )
   })
   it('edits content, shows manual history, renames and soft-deletes', async () => {
-    render(<Docs path="/docs/friends/doc123456" />)
+    render(<Docs path="/docs/friends/doc123456" uid="test-user" />)
     expect(await screen.findByText(/Employment:/)).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: 'Edit document' }))
     fireEvent.change(screen.getByLabelText('Document'), {
@@ -202,6 +377,6 @@ describe('Docs interface', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View edit history' }))
     expect(await screen.findByText('+ Microsoft')).toBeVisible()
     expect(screen.getByText('− Apple')).toBeVisible()
-    expect(screen.getByText(/manual · correction/)).toBeVisible()
+    expect(screen.getByText(/manual · correction/i)).toBeVisible()
   })
 })
