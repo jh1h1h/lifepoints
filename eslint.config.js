@@ -12,6 +12,7 @@ export default tseslint.config(
       'src/generated/**',
       'coverage/**',
       'test-results/**',
+      'functions/venv/**',
     ],
   },
   js.configs.recommended,

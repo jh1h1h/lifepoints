@@ -6,6 +6,7 @@ import { useActivities } from './hooks/useActivities'
 import { useTasks } from './hooks/useTasks'
 import { useCurrentTime } from './hooks/useCurrentTime'
 import { firebaseConfigured } from './services/firebase'
+import { href, navigate, useRoute } from './utils/routes'
 
 type Page = 'dashboard' | 'history' | 'settings'
 const History = lazy(async () => ({
@@ -14,9 +15,14 @@ const History = lazy(async () => ({
 const Settings = lazy(async () => ({
   default: (await import('./pages/Settings')).Settings,
 }))
+const Docs = lazy(async () => ({
+  default: (await import('./pages/Docs')).Docs,
+}))
 
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard')
+  const route = useRoute()
+  const docsActive = route.startsWith('/docs')
   const now = useCurrentTime()
   const {
     user,
@@ -112,22 +118,56 @@ export default function App() {
           <div className="brand">
             <span className="logo-mark small">L</span> LifePoints
           </div>
-          <nav aria-label="Main navigation">
-            {nav.map((item) => (
-              <button
-                className={page === item.id ? 'active' : ''}
-                aria-current={page === item.id ? 'page' : undefined}
-                onClick={() => setPage(item.id)}
-                key={item.id}
-              >
-                <item.icon aria-hidden="true" size={19} />
-                <span>{item.label}</span>
-              </button>
-            ))}
+          <nav aria-label="Sections" className="section-nav">
+            <a
+              href={href('/points')}
+              aria-current={!docsActive ? 'page' : undefined}
+              onClick={(event) => {
+                event.preventDefault()
+                navigate('/points')
+              }}
+            >
+              Points
+            </a>
+            <a
+              href={href('/docs')}
+              aria-current={docsActive ? 'page' : undefined}
+              onClick={(event) => {
+                event.preventDefault()
+                navigate('/docs')
+              }}
+            >
+              Docs
+            </a>
           </nav>
+          {!docsActive && (
+            <nav aria-label="Main navigation">
+              {nav.map((item) => (
+                <button
+                  className={page === item.id ? 'active' : ''}
+                  aria-current={page === item.id ? 'page' : undefined}
+                  onClick={() => setPage(item.id)}
+                  key={item.id}
+                >
+                  <item.icon aria-hidden="true" size={19} />
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </nav>
+          )}
         </div>
       </header>
-      {loading || taskState.loading ? (
+      {docsActive ? (
+        <Suspense
+          fallback={
+            <main className="container page">
+              <p>Loading Docs…</p>
+            </main>
+          }
+        >
+          <Docs path={route} />
+        </Suspense>
+      ) : loading || taskState.loading ? (
         <main className="container page">
           <p className="loading">Loading your activities and tasks…</p>
         </main>

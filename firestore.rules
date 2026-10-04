@@ -47,5 +47,16 @@ service cloud.firestore {
         && request.resource.data.seedVersion == 1
         && request.resource.data.createdAt is string;
     }
+    match /users/{uid}/docs/{entityId} {
+      allow read: if owner(uid);
+      allow write: if false;
+      match /edits/{editId} {
+        allow read: if owner(uid);
+        allow write: if false;
+      }
+    }
+    match /users/{uid}/docOperations/{operationId} {
+      allow read, write: if false;
+    }
   }
 }

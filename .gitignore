@@ -12,3 +12,5 @@ firestore-debug.log
 __pycache__/
 *.pyc
 *.tsbuildinfo
+functions/venv/
+.pytest_cache/
