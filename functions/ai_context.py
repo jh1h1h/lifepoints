@@ -18,7 +18,6 @@ class ContextFailure(Exception):
 @dataclass
 class RetrievedContext:
     candidates: list[dict]
-    active_records: list[dict]
     histories: dict[str, list[dict]]
     context_text: str
 
@@ -100,4 +99,4 @@ class ContextRetriever:
                                    "retrievedCandidates": payload}, ensure_ascii=False)
         if len(context_text) > self.max_context_chars:
             raise ContextFailure("resource-exhausted", "Relevant context exceeds the configured budget; no history was truncated")
-        return RetrievedContext(matched, active, histories, context_text)
+        return RetrievedContext(matched, histories, context_text)

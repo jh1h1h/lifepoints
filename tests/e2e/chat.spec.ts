@@ -33,6 +33,27 @@ test('explains rejected model output and exposes the raw response only when expa
   ).toHaveCount(0)
 })
 
+test('offers a model-chosen edit even when the request is phrased as a question', async ({
+  page,
+}) => {
+  await signIn(page)
+  await ask(page, 'Create Kevin')
+  await expect(
+    page.getByRole('region', { name: 'create proposal for Kevin' }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'Approve change' }).click()
+  await expect(page.getByText(/Saved Kevin, revision 1/)).toBeVisible()
+  await ask(page, 'Could you add that Kevin works at Apple?')
+  const proposal = page.getByRole('region', { name: 'add proposal for Kevin' })
+  await expect(proposal).toBeVisible()
+  await expect(proposal.getByText('Pending approval')).toBeVisible()
+  await expect(
+    proposal.getByText(/Nothing is saved until you approve/),
+  ).toBeVisible()
+  await proposal.getByRole('button', { name: 'Approve change' }).click()
+  await expect(page.getByText(/Saved Kevin, revision 2/)).toBeVisible()
+})
+
 test('chat suggestions require approval and support current, historical, and manual document workflows', async ({
   page,
 }) => {

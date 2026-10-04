@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import re
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -44,14 +43,6 @@ def _id(value, label):
 
 def _utcnow():
     return datetime.now(timezone.utc)
-
-
-def _question(message: str) -> bool:
-    return bool("?" in message or re.match(r"(?i)^\s*(who|what|where|when|why|how|does|did|is|was|were|do)\b", message))
-
-
-def _historical_question(message: str) -> bool:
-    return bool(re.search(r"(?i)\b(previous|previously|formerly|before|used to|historical|past)\b", message))
 
 
 def _candidate_choice(record: dict) -> dict:
@@ -193,24 +184,6 @@ class ActionEngine:
         allowed_ids = [selected_id] if selected_id else (prior["candidateIds"] if prior else None)
         context = ContextRetriever(self.db, self.uid).retrieve(message, include_full_history, allowed_ids)
         candidates = context.candidates
-        if len(candidates) > 1:
-            first_score = _name_score(message, candidates[0])
-            second_score = _name_score(message, candidates[1])
-            if first_score[0] < 100 or first_score == second_score:
-                return self._clarify("Which document do you mean?", candidates, conversation_id, original)
-            candidates = candidates[:1]
-            context = ContextRetriever(self.db, self.uid).retrieve(message, include_full_history, [candidates[0]["id"]])
-        if _question(original) and not candidates:
-            return ({"kind": "query", "action": "query", "answer": "I don't have that information in Docs.",
-                     "references": [], "requestId": request_id}, None)
-        if _question(original) and candidates and not include_full_history and _historical_question(original):
-            if not any(re.search(r"(?i)\b(previously|formerly|before|used to)\b", item["content"]) for item in candidates):
-                return ({"kind": "query", "action": "query", "answer": "That history is unavailable from the current documents. Enable full history to check earlier edits.",
-                         "references": [_reference(item) for item in candidates], "requestId": request_id}, None)
-        if _question(original) and candidates and re.search(r"(?i)\bbirthday\b", original):
-            if not any(re.search(r"(?i)\bbirthday\b", item["content"]) for item in candidates):
-                return ({"kind": "query", "action": "query", "answer": "The birthday is not recorded in the available document.",
-                         "references": [_reference(item) for item in candidates], "requestId": request_id}, None)
         conversation_text = (f"Original user message: {original}\nClarification: {message}"
                              + (f"\nSelected entity ID: {selected_id}" if selected_id else "")) if prior else message
         prompt_data = {"userMessage": conversation_text, "includeFullHistory": include_full_history,
@@ -221,15 +194,7 @@ class ActionEngine:
         if reply.response_id:
             diagnostics["modelResponseId"] = reply.response_id
         action = parse_action(reply.content)
-        allow_duplicate = bool(prior and re.search(r"(?i)\b(create another|new one|another copy)\b", message))
-        if isinstance(action, CreateAction) and not allow_duplicate:
-            normalized = action.name.casefold().strip()
-            duplicates = [item for item in context.active_records if item["entityType"] == action.entityType and
-                          (normalized == item["normalizedName"] or normalized in [alias.casefold() for alias in item.get("aliases", [])])]
-            if duplicates:
-                return self._clarify(f"A {action.entityType} named {action.name} already exists. Use an existing document or create another?",
-                                     duplicates, conversation_id, original)
-        self._validate(action, message, original, context, include_full_history, allow_duplicate)
+        self._validate(action, context, include_full_history)
         usage = {"promptTokens": reply.prompt_tokens, "completionTokens": reply.completion_tokens,
                  "latencyMs": reply.latency_ms, "modelResponseId": reply.response_id,
                  "promptVersion": PROMPT_VERSION}
@@ -278,18 +243,9 @@ class ActionEngine:
                  "expiresAt": _utcnow() + timedelta(hours=24)}
         return response, state
 
-    def _validate(self, action, message, original, context, full_history, allow_duplicate=False):
+    def _validate(self, action, context, full_history):
         candidates = {item["id"]: item for item in context.candidates}
-        if _question(original) and isinstance(action, (AddAction, ModifyAction, DeleteAction)):
-            raise EngineFailure("failed-precondition", "A question cannot change a document")
         if isinstance(action, CreateAction):
-            normalized = action.name.casefold().strip()
-            duplicates = [item for item in context.active_records if item["entityType"] == action.entityType and
-                          (normalized == item["normalizedName"] or normalized in [alias.casefold() for alias in item.get("aliases", [])])]
-            if duplicates and not allow_duplicate:
-                raise EngineFailure("failed-precondition", "A possible duplicate exists; choose an existing document or clarify first")
-            if _question(original):
-                raise EngineFailure("failed-precondition", "A question cannot implicitly create a document")
             if not action.name.strip():
                 raise EngineFailure("failed-precondition", "A name is required")
         elif isinstance(action, (AddAction, ModifyAction, DeleteAction)):
@@ -298,10 +254,7 @@ class ActionEngine:
                 raise EngineFailure("permission-denied", "Proposed target was not in the retrieved owner context")
             if action.expectedRevision != target["revision"]:
                 raise EngineFailure("aborted", "Model used a stale document revision")
-            if isinstance(action, DeleteAction) and action.scope == "entity":
-                if not re.search(r"(?i)\b(delete|remove|erase)\b", original) or not re.search(r"(?i)\b(record|document|entity|friend|project|person)\b|^\s*delete\s+\w+", original):
-                    raise EngineFailure("failed-precondition", "Whole-document deletion was not explicitly requested")
-            else:
+            if not (isinstance(action, DeleteAction) and action.scope == "entity"):
                 _apply(action, target["content"])
         elif isinstance(action, QueryAction):
             for reference in action.references:
@@ -450,14 +403,3 @@ class ActionEngine:
         if result.get("expired"):
             raise EngineFailure("failed-precondition", "Proposal expired")
         return result
-
-
-def _name_score(message: str, item: dict):
-    folded = message.casefold()
-    names = [item["name"], *item.get("aliases", [])]
-    exact = [(100, len(name)) for name in names if re.search(r"(?<!\w)" + re.escape(name.casefold()) + r"(?!\w)", folded)]
-    return max(exact, default=(20, 0))
-
-
-def _reference(item: dict):
-    return {"entityId": item["id"], "revision": item["revision"], "eventIds": []}

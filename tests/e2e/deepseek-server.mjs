@@ -10,6 +10,23 @@ const reply = (input) => {
     return { schemaVersion: 1, action: 'execute', command: 'unsupported' }
   }
   if (message.includes('where did kevin work previously')) {
+    if (!data.includeFullHistory) {
+      return {
+        schemaVersion: 1,
+        action: 'query',
+        answer:
+          'That is unavailable from current documents. Enable full history to check earlier edits.',
+        references: target
+          ? [
+              {
+                entityId: target.entityId,
+                revision: target.revision,
+                eventIds: [],
+              },
+            ]
+          : [],
+      }
+    }
     const eventIds = [
       ...(target.historicalDeltas ?? '').matchAll(
         /Event ID: ([A-Za-z0-9_-]+)/g,
@@ -32,10 +49,18 @@ const reply = (input) => {
     return {
       schemaVersion: 1,
       action: 'query',
-      answer: 'Kevin currently works at Apple.',
-      references: [
-        { entityId: target.entityId, revision: target.revision, eventIds: [] },
-      ],
+      answer: target
+        ? 'Kevin currently works at Apple.'
+        : 'Kevin is not recorded.',
+      references: target
+        ? [
+            {
+              entityId: target.entityId,
+              revision: target.revision,
+              eventIds: [],
+            },
+          ]
+        : [],
     }
   }
   if (message.includes('create kevin')) {
@@ -55,6 +80,19 @@ const reply = (input) => {
       entityType: 'project',
       name: 'Friendfolio',
       content: 'Goals:\nBuild Friendfolio',
+      changeType: 'new_information',
+    }
+  }
+  if (message.includes('could you add that kevin works at apple?')) {
+    return {
+      ...base,
+      action: 'add',
+      entityType: 'friend',
+      entityId: target.entityId,
+      expectedRevision: target.revision,
+      scope: 'content',
+      newText: 'Working at Apple',
+      afterText: null,
       changeType: 'new_information',
     }
   }
@@ -110,6 +148,18 @@ const reply = (input) => {
     }
   }
   if (message.includes('changed jobs')) {
+    if (candidates.length > 1 && !message.includes('selected entity id:')) {
+      return {
+        schemaVersion: 1,
+        action: 'clarify',
+        question: 'Which document do you mean?',
+        choices: candidates.map(({ entityId, entityType, name }) => ({
+          entityId,
+          entityType,
+          name,
+        })),
+      }
+    }
     return {
       ...base,
       action: 'modify',
