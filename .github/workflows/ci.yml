@@ -38,6 +38,8 @@ jobs:
       - run: npm run test:docs
       - run: npx playwright install --with-deps --only-shell chromium
       - run: npm run test:e2e
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /nonexistent-emulator-credentials.json
       - name: Require Firebase configuration for Pages
         if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         env:

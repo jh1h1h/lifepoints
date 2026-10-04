@@ -53,6 +53,8 @@ Every creation, changed content, rename, alias edit, and soft deletion atomicall
 
 The authenticated `docs_api` callable is the only Docs write path. It checks the expected revision in a Firestore transaction, rejects stale edits, and stores a per-user operation record at `users/{uid}/docOperations/{operationId}` so retries with the same request cannot duplicate an edit. The UID comes from Firebase Auth, never from the browser request. Firestore rules grant only owner reads of Docs and edits and deny all direct client writes; the Admin SDK in the callable performs validated writes. No AI integration, Docs backup/import/export, or general recovery feature is included in this phase.
 
+The Functions emulator uses anonymous credentials only when `FIRESTORE_EMULATOR_HOST` is set; no local Google Application Default Credentials or service-account key is needed for these tests. Deployed Functions continue to use the Firebase Admin SDK's normal credentials.
+
 ## Tests
 
 ```bash
@@ -70,7 +72,7 @@ Emulator and browser tests use the local Firebase emulators with a demo project 
 
 ### Verification for Docs phase (2026-10-04)
 
-Lint, Prettier, TypeScript, 32 Vitest tests, 8 Firestore rules tests, 7 Python tests (including emulator transactions), 18 Playwright tests, and a production build with `VITE_BASE_PATH=/lifepoints/` passed locally. The build produced identical `index.html` and `404.html` files with `/lifepoints/` asset URLs. Docs screens were visually inspected at 375px and 1280px; browser tests also checked 768px and no horizontal overflow. Cloud deployment and real Google sign-in were not exercised locally and require the Firebase/Pages configuration above.
+Lint, Prettier, TypeScript, 32 Vitest tests, 8 Firestore rules tests, 9 Python tests (including emulator transactions), 18 Playwright tests, and a production build with `VITE_BASE_PATH=/lifepoints/` passed locally. The browser tests also passed with `GOOGLE_APPLICATION_CREDENTIALS` set to a nonexistent path, reproducing a CI runner without local ADC. The build produced identical `index.html` and `404.html` files with `/lifepoints/` asset URLs. Docs screens were visually inspected at 375px and 1280px; browser tests also checked 768px and no horizontal overflow. Cloud deployment and real Google sign-in were not exercised locally and require the Firebase/Pages configuration above.
 
 ## Backups
 
