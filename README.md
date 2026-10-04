@@ -35,7 +35,7 @@ The activity documents store `taskId`, `taskName`, `taskDescription`, `category`
 
 ## GitHub Pages
 
-Push this repository to GitHub and select **GitHub Actions** as the Pages source under Settings → Pages. The workflow in `.github/workflows/ci.yml` runs validation on pushes and pull requests, then deploys `main` only after Python tests, lint, TypeScript, unit and component tests, Firestore emulator tests, Playwright tests, and the build pass.
+Push this repository to GitHub and select **GitHub Actions** as the Pages source under Settings → Pages. The workflow in `.github/workflows/ci.yml` runs validation on pushes and pull requests. A push to `main` or a manually dispatched run on `main` deploys only after Python tests, lint, TypeScript, unit and component tests, Firestore emulator tests, Playwright tests, and the build pass. Pull requests never deploy.
 
 In repository Settings → Secrets and variables → Actions, add secret `VITE_FIREBASE_API_KEY` and variables `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_APP_ID`, plus `VITE_FIREBASE_STORAGE_BUCKET` and `VITE_FIREBASE_MESSAGING_SENDER_ID` if supplied by Firebase. The Firebase web config is embedded in the public site; access control lives in Firebase rules. The workflow uses `/<repository-name>/` as Vite's base path. Set variable `VITE_BASE_PATH` to `/` for a `USERNAME.github.io` repository or a custom root domain, or to the appropriate subpath for another deployment.
 
