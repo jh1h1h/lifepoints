@@ -18,7 +18,6 @@ import {
   Sun,
   Plus,
 } from 'lucide-react'
-import tasksData from '../generated/tasks.json'
 import { ActivityList } from '../components/ActivityList'
 import {
   CATEGORIES,
@@ -34,7 +33,6 @@ import {
   getWeeklyCategoryBreakdown,
 } from '../utils/scoring'
 
-const tasks = tasksData as unknown as Task[]
 const icons = {
   'book-open': BookOpen,
   hammer: Hammer,
@@ -56,22 +54,24 @@ const icons = {
 
 interface Props {
   activities: Activity[]
+  tasks: Task[]
   add: (input: ActivityInput) => Promise<boolean>
   remove: (id: string) => Promise<void>
   editNote: (id: string, note: string) => Promise<void>
+  saveTaskNote: (id: string, note: string) => Promise<boolean>
   busy: boolean
   now?: Date
-  taskOverride?: Task[]
 }
 
 export function Dashboard({
   activities,
+  tasks,
   add,
   remove,
   editNote,
+  saveTaskNote,
   busy,
   now = new Date(),
-  taskOverride,
 }: Props) {
   const [filter, setFilter] = useState<Category | 'all'>('all')
   const [noteTask, setNoteTask] = useState<Task | null>(null)
@@ -85,20 +85,23 @@ export function Dashboard({
     () => getWeeklyCategoryBreakdown(activities, now),
     [activities, now],
   )
-  const visible = (taskOverride ?? tasks).filter(
+  const visible = tasks.filter(
     (task) => filter === 'all' || task.category === filter,
   )
-  async function log(task: Task, userNote = '') {
-    const saved = await add({
+  async function log(task: Task) {
+    await add({
       taskId: task.id,
       taskName: task.name,
       taskDescription: task.description,
       category: task.category,
       configuredPoints: task.points,
       timestamp: new Date().toISOString(),
-      note: userNote,
+      note: '',
     })
-    if (saved) {
+  }
+  async function saveNote() {
+    if (!noteTask) return
+    if (await saveTaskNote(noteTask.id, note)) {
       setNoteTask(null)
       setNote('')
     }
@@ -177,6 +180,9 @@ export function Dashboard({
                   <Icon aria-hidden="true" size={20} />
                   <span>
                     <strong>{task.name}</strong>
+                    {task.note && (
+                      <span className="task-note-text">{task.note}</span>
+                    )}
                     <small>
                       {CATEGORY_NAMES[task.category]} · +{task.points}
                     </small>
@@ -187,16 +193,21 @@ export function Dashboard({
                   disabled={busy}
                   onClick={() => {
                     setNoteTask(task)
-                    setNote('')
+                    setNote(task.note)
                   }}
-                  aria-label={`Add ${task.name} with a note`}
+                  aria-label={`${task.note ? 'Edit' : 'Add'} note for ${task.name}`}
                 >
-                  + note
+                  {task.note ? '(edit)' : '+ note'}
                 </button>
               </div>
             )
           })}
         </div>
+        {visible.length === 0 && (
+          <p className="empty">
+            No tasks in this category. Add one in Settings.
+          </p>
+        )}
       </section>
       <section className="card section-card">
         <div className="section-heading">
@@ -219,15 +230,19 @@ export function Dashboard({
             className="modal card"
             role="dialog"
             aria-modal="true"
-            aria-label={`Add ${noteTask.name} with a note`}
+            aria-label={`Note for ${noteTask.name}`}
             onClick={(event) => event.stopPropagation()}
             onSubmit={(event) => {
               event.preventDefault()
-              void log(noteTask, note)
+              void saveNote()
             }}
           >
             <h2>{noteTask.name}</h2>
-            <label htmlFor="new-note">Optional note</label>
+            <p className="muted">
+              This note appears on the task card. Saving it does not log an
+              activity.
+            </p>
+            <label htmlFor="new-note">Task note</label>
             <textarea
               id="new-note"
               maxLength={2000}
@@ -240,7 +255,7 @@ export function Dashboard({
                 Cancel
               </button>
               <button className="primary" disabled={busy}>
-                Add +{noteTask.points}
+                Save note
               </button>
             </div>
           </form>

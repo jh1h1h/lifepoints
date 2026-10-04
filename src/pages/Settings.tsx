@@ -1,23 +1,44 @@
 import { useRef, useState } from 'react'
 import type { User } from 'firebase/auth'
-import type { Activity } from '../types'
+import type { Activity, Task, TaskDraft } from '../types'
 import { createBackup, parseBackup } from '../utils/backup'
+import { TaskManager } from '../components/TaskManager'
 
 interface Props {
   user: User
   activities: Activity[]
+  tasks: Task[]
   merge: (items: Activity[]) => Promise<void>
+  mergeTasks: (items: Task[], replaceExisting: boolean) => Promise<number>
+  createTask: (draft: TaskDraft) => Promise<boolean>
+  updateTask: (id: string, draft: TaskDraft) => Promise<boolean>
+  removeTask: (id: string) => Promise<boolean>
   logOut: () => Promise<void>
   busy: boolean
 }
 
-export function Settings({ user, activities, merge, logOut, busy }: Props) {
+export function Settings({
+  user,
+  activities,
+  tasks,
+  merge,
+  mergeTasks,
+  createTask,
+  updateTask,
+  removeTask,
+  logOut,
+  busy,
+}: Props) {
   const picker = useRef<HTMLInputElement>(null)
   const [error, setError] = useState('')
+  const [replaceTasks, setReplaceTasks] = useState(false)
   function exportData() {
-    const blob = new Blob([JSON.stringify(createBackup(activities), null, 2)], {
-      type: 'application/json',
-    })
+    const blob = new Blob(
+      [JSON.stringify(createBackup(activities, tasks), null, 2)],
+      {
+        type: 'application/json',
+      },
+    )
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
@@ -31,6 +52,7 @@ export function Settings({ user, activities, merge, logOut, busy }: Props) {
     try {
       const backup = parseBackup(await file.text())
       await merge(backup.activities)
+      if (backup.tasks) await mergeTasks(backup.tasks, replaceTasks)
     } catch (failure) {
       setError((failure as Error).message)
     }
@@ -50,11 +72,18 @@ export function Settings({ user, activities, merge, logOut, busy }: Props) {
         <p className="muted">{user.email}</p>
         <button onClick={logOut}>Sign out</button>
       </section>
+      <TaskManager
+        tasks={tasks}
+        create={createTask}
+        update={updateTask}
+        remove={removeTask}
+        busy={busy}
+      />
       <section className="card section-card settings-card">
         <h2>Your data</h2>
         <p className="muted">
-          Download a JSON backup, or merge one back into this account. Existing
-          activity IDs are kept.
+          Download a JSON backup of activities and tasks, or merge one back into
+          this account. Existing IDs are kept.
         </p>
         <div className="settings-actions">
           <button onClick={exportData}>Export JSON</button>
@@ -70,6 +99,14 @@ export function Settings({ user, activities, merge, logOut, busy }: Props) {
             Import JSON
           </button>
         </div>
+        <label className="import-option">
+          <input
+            type="checkbox"
+            checked={replaceTasks}
+            onChange={(event) => setReplaceTasks(event.target.checked)}
+          />
+          Replace matching tasks with versions from the backup
+        </label>
         {error && (
           <p className="error" role="alert">
             {error}

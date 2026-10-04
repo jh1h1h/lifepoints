@@ -1,13 +1,14 @@
-import { CATEGORIES, type Activity, type Category } from '../types'
+import { CATEGORIES, type Activity, type Category, type Task } from '../types'
 
 export interface Backup {
-  version: 1
+  version: 1 | 2
   exportedAt: string
   activities: Activity[]
+  tasks?: Task[]
 }
 
-export function createBackup(activities: Activity[]): Backup {
-  return { version: 1, exportedAt: new Date().toISOString(), activities }
+export function createBackup(activities: Activity[], tasks: Task[]): Backup {
+  return { version: 2, exportedAt: new Date().toISOString(), activities, tasks }
 }
 
 export function parseBackup(text: string): Backup {
@@ -21,10 +22,11 @@ export function parseBackup(text: string): Backup {
     throw new Error('The backup must be a JSON object.')
   const backup = parsed as Record<string, unknown>
   if (
-    backup.version !== 1 ||
+    (backup.version !== 1 && backup.version !== 2) ||
     typeof backup.exportedAt !== 'string' ||
     !Number.isFinite(Date.parse(backup.exportedAt)) ||
-    !Array.isArray(backup.activities)
+    !Array.isArray(backup.activities) ||
+    (backup.version === 2 && !Array.isArray(backup.tasks))
   )
     throw new Error('Unsupported or malformed backup.')
   const ids = new Set<string>()
@@ -66,6 +68,57 @@ export function parseBackup(text: string): Backup {
     if (ids.has(item.activityId as string))
       throw new Error('Duplicate activity ID in backup.')
     ids.add(item.activityId as string)
+  }
+  if (backup.version === 2) {
+    const taskIds = new Set<string>()
+    for (const value of backup.tasks as unknown[]) {
+      if (!value || typeof value !== 'object')
+        throw new Error('The backup contains an invalid task.')
+      const item = value as Record<string, unknown>
+      if (
+        typeof item.id !== 'string' ||
+        !/^[A-Za-z0-9_-]{1,128}$/.test(item.id)
+      )
+        throw new Error('Invalid task ID.')
+      if (taskIds.has(item.id)) throw new Error('Duplicate task ID in backup.')
+      taskIds.add(item.id)
+      if (!CATEGORIES.includes(item.category as Category))
+        throw new Error('Invalid task category.')
+      if (
+        typeof item.name !== 'string' ||
+        !item.name.trim() ||
+        item.name.length > 120
+      )
+        throw new Error('Invalid task name.')
+      if (
+        typeof item.description !== 'string' ||
+        item.description.length > 1000
+      )
+        throw new Error('Invalid task description.')
+      if (typeof item.icon !== 'string' || !item.icon.trim())
+        throw new Error('Invalid task icon.')
+      if (typeof item.note !== 'string' || item.note.length > 2000)
+        throw new Error('Invalid task note.')
+      if (
+        typeof item.points !== 'number' ||
+        !Number.isFinite(item.points) ||
+        item.points <= 0
+      )
+        throw new Error('Invalid task points.')
+      if (
+        typeof item.order !== 'number' ||
+        !Number.isFinite(item.order) ||
+        item.order < 0
+      )
+        throw new Error('Invalid task order.')
+      if (
+        typeof item.createdAt !== 'string' ||
+        !Number.isFinite(Date.parse(item.createdAt)) ||
+        typeof item.updatedAt !== 'string' ||
+        !Number.isFinite(Date.parse(item.updatedAt))
+      )
+        throw new Error('Invalid task date.')
+    }
   }
   return backup as unknown as Backup
 }

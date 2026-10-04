@@ -14,12 +14,38 @@ service cloud.firestore {
         && data.note is string && data.note.size() <= 2000
         && data.createdAt is string && data.updatedAt is string;
     }
+    function validTask(data) {
+      return data.keys().hasAll(['category', 'name', 'description', 'points', 'icon', 'note', 'order', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['category', 'name', 'description', 'points', 'icon', 'note', 'order', 'createdAt', 'updatedAt'])
+        && data.category in ['growth', 'people', 'life', 'play']
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 120
+        && data.description is string && data.description.size() <= 1000
+        && data.points is number && data.points > 0
+        && data.icon is string && data.icon.size() > 0
+        && data.note is string && data.note.size() <= 2000
+        && data.order is number && data.order >= 0
+        && data.createdAt is string && data.updatedAt is string;
+    }
     match /users/{uid}/activities/{activityId} {
       allow read: if owner(uid);
       allow create: if owner(uid) && validActivity(request.resource.data);
       allow update: if owner(uid) && validActivity(request.resource.data)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['note', 'updatedAt']);
       allow delete: if owner(uid);
+    }
+    match /users/{uid}/tasks/{taskId} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && validTask(request.resource.data);
+      allow update: if owner(uid) && validTask(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['category', 'name', 'description', 'points', 'icon', 'note', 'updatedAt']);
+      allow delete: if owner(uid);
+    }
+    match /users/{uid}/settings/taskList {
+      allow read: if owner(uid);
+      allow create: if owner(uid)
+        && request.resource.data.keys().hasOnly(['seedVersion', 'createdAt'])
+        && request.resource.data.seedVersion == 1
+        && request.resource.data.createdAt is string;
     }
   }
 }

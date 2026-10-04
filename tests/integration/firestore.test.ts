@@ -21,6 +21,17 @@ const valid = {
   createdAt: now,
   updatedAt: now,
 }
+const validTask = {
+  category: 'growth',
+  name: 'A task',
+  description: '',
+  points: 2.5,
+  icon: 'book-open',
+  note: '',
+  order: 0,
+  createdAt: now,
+  updatedAt: now,
+}
 
 beforeAll(async () => {
   environment = await initializeTestEnvironment({
@@ -68,6 +79,10 @@ describe('Firestore ownership and data rules', () => {
     const store = environment.unauthenticatedContext().firestore()
     await assertFails(getDoc(doc(store, 'users/alice/activities/a1')))
     await assertFails(setDoc(doc(store, 'users/alice/activities/a1'), valid))
+    await assertFails(getDoc(doc(store, 'users/alice/tasks/growth_1')))
+    await assertFails(
+      setDoc(doc(store, 'users/alice/tasks/growth_1'), validTask),
+    )
   })
   it('rejects malformed activity data', async () => {
     const store = environment.authenticatedContext('alice').firestore()
@@ -95,5 +110,29 @@ describe('Firestore ownership and data rules', () => {
       }),
     )
     expect((await getDoc(reference)).data()?.configuredPoints).toBe(0.3)
+  })
+  it('allows only the owner to manage tasks and keeps task identity stable', async () => {
+    const alice = environment.authenticatedContext('alice').firestore()
+    const bob = environment.authenticatedContext('bob').firestore()
+    const reference = doc(alice, 'users/alice/tasks/growth_1')
+    await assertSucceeds(setDoc(reference, validTask))
+    expect((await getDoc(reference)).data()?.points).toBe(2.5)
+    await assertSucceeds(
+      updateDoc(reference, { note: 'Reminder', updatedAt: now }),
+    )
+    await assertSucceeds(updateDoc(reference, { points: 3, updatedAt: now }))
+    await assertFails(updateDoc(reference, { createdAt: 'different' }))
+    await assertFails(getDoc(doc(bob, 'users/alice/tasks/growth_1')))
+    await assertFails(setDoc(doc(bob, 'users/alice/tasks/another'), validTask))
+    await assertFails(deleteDoc(doc(bob, 'users/alice/tasks/growth_1')))
+    await assertSucceeds(deleteDoc(reference))
+  })
+  it('protects the task initialization marker', async () => {
+    const alice = environment.authenticatedContext('alice').firestore()
+    const bob = environment.authenticatedContext('bob').firestore()
+    const marker = doc(alice, 'users/alice/settings/taskList')
+    await assertSucceeds(setDoc(marker, { seedVersion: 1, createdAt: now }))
+    await assertFails(setDoc(marker, { seedVersion: 1, createdAt: now }))
+    await assertFails(getDoc(doc(bob, 'users/alice/settings/taskList')))
   })
 })

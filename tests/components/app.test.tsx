@@ -11,13 +11,18 @@ import type { User } from 'firebase/auth'
 import { Dashboard } from '../../src/pages/Dashboard'
 import { History } from '../../src/pages/History'
 import { Settings } from '../../src/pages/Settings'
-import tasksData from '../../src/generated/tasks.json'
+import { TEMPLATE_SEED } from '../../src/data/taskSeeds'
 import type { Activity, ActivityInput, Task } from '../../src/types'
 
-const growthTask = (tasksData as Task[]).find(
-  (task) => task.category === 'growth',
-)
-if (!growthTask) throw new Error('Component tests require a Growth task')
+const growthSeed = TEMPLATE_SEED.find((task) => task.category === 'growth')
+if (!growthSeed) throw new Error('Component tests require a Growth task')
+const growthTask: Task = {
+  ...growthSeed,
+  note: '',
+  order: 0,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+}
 const taskButtonName = `Add ${growthTask.name}, ${growthTask.points} points in Growth`
 
 vi.mock('../../src/components/HistoryCharts', () => ({
@@ -26,6 +31,7 @@ vi.mock('../../src/components/HistoryCharts', () => ({
 
 function TestDashboard({ initial = [] }: { initial?: Activity[] }) {
   const [activities, setActivities] = useState(initial)
+  const [tasks, setTasks] = useState([growthTask])
   async function add(input: ActivityInput) {
     setActivities((current) => [
       {
@@ -52,9 +58,16 @@ function TestDashboard({ initial = [] }: { initial?: Activity[] }) {
   return (
     <Dashboard
       activities={activities}
+      tasks={tasks}
       add={add}
       remove={remove}
       editNote={editNote}
+      saveTaskNote={async (id, note) => {
+        setTasks((current) =>
+          current.map((task) => (task.id === id ? { ...task, note } : task)),
+        )
+        return true
+      }}
       busy={false}
     />
   )
@@ -122,21 +135,27 @@ describe('dashboard', () => {
       expect(screen.getByLabelText('Weekly score 0 out of 100')).toBeVisible(),
     )
   })
-  it('adds an activity with an optional note', async () => {
+  it('saves and edits a task note without logging points', async () => {
     render(<TestDashboard />)
     fireEvent.click(
       screen.getByRole('button', {
-        name: `Add ${growthTask.name} with a note`,
+        name: `Add note for ${growthTask.name}`,
       }),
     )
-    fireEvent.change(screen.getByLabelText('Optional note'), {
+    fireEvent.change(screen.getByLabelText('Task note'), {
       target: { value: 'Practised a new skill' },
     })
-    fireEvent.click(
-      screen.getByRole('button', { name: `Add +${growthTask.points}` }),
-    )
+    fireEvent.click(screen.getByRole('button', { name: 'Save note' }))
     await waitFor(() =>
       expect(screen.getByText('Practised a new skill')).toBeVisible(),
+    )
+    expect(screen.getByLabelText('Weekly score 0 out of 100')).toBeVisible()
+    expect(screen.getByText('No activities here yet.')).toBeVisible()
+    fireEvent.click(
+      screen.getByRole('button', { name: `Edit note for ${growthTask.name}` }),
+    )
+    expect(screen.getByLabelText('Task note')).toHaveValue(
+      'Practised a new skill',
     )
   })
   it('shows non-color cap treatment at 25', () => {
@@ -168,7 +187,12 @@ describe('history and settings', () => {
       <Settings
         user={{ displayName: 'Test User', email: 'test@example.com' } as User}
         activities={[]}
+        tasks={[growthTask]}
         merge={async () => {}}
+        mergeTasks={async () => 0}
+        createTask={async () => true}
+        updateTask={async () => true}
+        removeTask={async () => true}
         logOut={async () => {}}
         busy={false}
       />,

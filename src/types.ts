@@ -22,7 +22,16 @@ export interface Task {
   description: string
   points: number
   icon: string
+  note: string
+  order: number
+  createdAt: string
+  updatedAt: string
 }
+
+export type TaskDraft = Pick<
+  Task,
+  'category' | 'name' | 'description' | 'points' | 'icon' | 'note'
+>
 
 export interface Activity {
   activityId: string

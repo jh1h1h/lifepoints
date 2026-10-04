@@ -298,6 +298,13 @@ h3 {
 .task-button small {
   color: #5b6b62;
 }
+.task-note-text {
+  color: #374d40;
+  font-size: 0.83rem;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .note-action {
   border: 0;
   border-left: 1px solid #dde6df;
@@ -471,6 +478,85 @@ h3 {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+.import-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 14px;
+  font-size: 0.9rem;
+}
+.import-option input {
+  width: 18px;
+  height: 18px;
+}
+.task-settings {
+  max-width: 920px;
+}
+.task-editor {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  margin: 16px 0;
+  border: 1px solid #dce6de;
+  border-radius: 14px;
+  background: #f8faf7;
+}
+.task-editor label {
+  display: grid;
+  gap: 6px;
+  font-weight: 650;
+  font-size: 0.9rem;
+}
+.task-editor input,
+.task-editor select,
+.task-editor textarea {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #bdcabe;
+  border-radius: 9px;
+  padding: 10px;
+  background: #fff;
+  color: #20302b;
+}
+.task-editor textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+.task-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.task-editor-actions,
+.managed-task-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.task-editor-actions {
+  justify-content: flex-end;
+}
+.managed-task {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+  border-top: 1px solid #e7ede8;
+}
+.managed-task > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.managed-task span,
+.managed-task p {
+  color: #5b6b62;
+  font-size: 0.85rem;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .visually-hidden {
   position: absolute;
@@ -646,6 +732,12 @@ h3 {
   }
   .note-action {
     min-width: 67px;
+  }
+  .task-editor-grid {
+    grid-template-columns: 1fr;
+  }
+  .managed-task {
+    display: grid;
   }
   .status-area {
     bottom: 77px;

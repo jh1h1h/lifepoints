@@ -3,6 +3,7 @@ import { BarChart3, House, Settings as SettingsIcon } from 'lucide-react'
 import { Dashboard } from './pages/Dashboard'
 import { useAuth } from './hooks/useAuth'
 import { useActivities } from './hooks/useActivities'
+import { useTasks } from './hooks/useTasks'
 import { useCurrentTime } from './hooks/useCurrentTime'
 import { firebaseConfigured } from './services/firebase'
 
@@ -37,17 +38,29 @@ export default function App() {
     merge,
     undo,
   } = useActivities(user?.uid)
+  const taskState = useTasks(user?.uid, user?.email)
+  const setTaskMessage = taskState.setMessage
+  const activeMessage = taskState.message || message
   useEffect(() => {
     if (
-      !['Activity added.', 'Activity deleted.', 'Note saved.'].includes(
-        message,
-      ) &&
-      !/^Imported \d+ activities\.$/.test(message)
+      ![
+        'Activity added.',
+        'Activity deleted.',
+        'Note saved.',
+        'Task added.',
+        'Task saved.',
+        'Task note saved.',
+        'Task removed.',
+      ].includes(activeMessage) &&
+      !/^Imported \d+ activities\.$/.test(activeMessage)
     )
       return
-    const timeout = window.setTimeout(() => setMessage(''), 5000)
+    const timeout = window.setTimeout(() => {
+      setMessage('')
+      setTaskMessage('')
+    }, 5000)
     return () => window.clearTimeout(timeout)
-  }, [message, setMessage])
+  }, [activeMessage, setMessage, setTaskMessage])
   if (!firebaseConfigured)
     return (
       <main className="setup-state card">
@@ -114,17 +127,19 @@ export default function App() {
           </nav>
         </div>
       </header>
-      {loading ? (
+      {loading || taskState.loading ? (
         <main className="container page">
-          <p className="loading">Loading your activities…</p>
+          <p className="loading">Loading your activities and tasks…</p>
         </main>
       ) : page === 'dashboard' ? (
         <Dashboard
           activities={activities}
+          tasks={taskState.tasks}
           add={add}
           remove={remove}
           editNote={editNote}
-          busy={busy}
+          saveTaskNote={taskState.setNote}
+          busy={busy || taskState.busy}
           now={now}
         />
       ) : (
@@ -147,21 +162,32 @@ export default function App() {
             <Settings
               user={user}
               activities={activities}
+              tasks={taskState.tasks}
               merge={merge}
+              mergeTasks={taskState.merge}
+              createTask={taskState.create}
+              updateTask={taskState.update}
+              removeTask={taskState.remove}
               logOut={logOut}
-              busy={busy}
+              busy={busy || taskState.busy}
             />
           )}
         </Suspense>
       )}
       <div className="status-area" aria-live="polite">
-        {message && (
+        {activeMessage && (
           <div className="status" role="status">
-            <span>{message}</span>
-            {undoId && message === 'Activity added.' && (
+            <span>{activeMessage}</span>
+            {undoId && activeMessage === 'Activity added.' && (
               <button onClick={undo}>Undo</button>
             )}
-            <button aria-label="Dismiss message" onClick={() => setMessage('')}>
+            <button
+              aria-label="Dismiss message"
+              onClick={() => {
+                setMessage('')
+                setTaskMessage('')
+              }}
+            >
               ×
             </button>
           </div>
