@@ -434,9 +434,13 @@ export function DocsChat({ uid }: { uid: string }) {
               </small>
             </div>
             <div className="chat-bubble chat-assistant">
-              <div className="chat-meta">
-                <span className="chat-state">{statusLabel(entry.status)}</span>
-              </div>
+              {entry.status !== 'rejected' && (
+                <div className="chat-meta">
+                  <span className="chat-state">
+                    {statusLabel(entry.status)}
+                  </span>
+                </div>
+              )}
               {entry.status === 'thinking' && <p role="status">Thinking…</p>}
               {entry.result?.kind === 'query' && (
                 <>
