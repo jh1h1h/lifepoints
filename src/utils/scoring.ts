@@ -17,7 +17,7 @@ export function groupActivitiesByCategory(
 }
 
 export function getEffectivePoints(rawPoints: number): number {
-  return Math.min(Math.max(rawPoints, 0), CATEGORY_CAP)
+  return Math.min(Math.max(Number(rawPoints.toPrecision(12)), 0), CATEGORY_CAP)
 }
 
 export function calculateCategoryScore(

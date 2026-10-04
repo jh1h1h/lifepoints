@@ -18,7 +18,7 @@ Open the URL printed by Vite. `npm run dev` and `npm run build` regenerate `src/
 
 ## Editing tasks
 
-Edit only `tasks.py`. `TASKS` is the sole list of predefined tasks; `src/generated/tasks.json` is generated. To rename or revalue a task, change its `name` or `points` in that list, then run `npm run generate:tasks`. To add a task, add a dictionary with a new unique `id`, valid category (`growth`, `people`, `life`, or `play`), non-empty name, description, and icon, and positive integer points. To remove a task, remove its dictionary. Existing activity records keep their saved names, descriptions, categories, and point values.
+Edit only `tasks.py`. `TASKS` is the sole list of predefined tasks; `src/generated/tasks.json` is generated. To rename or revalue a task, change its `name` or `points` in that list, then run `npm run generate:tasks`. To add a task, add a dictionary with a new unique `id`, valid category (`growth`, `people`, `life`, or `play`), non-empty name and icon, a string description (which may be empty), and positive finite points (whole or fractional). To remove a task, remove its dictionary. Existing activity records keep their saved names, descriptions, categories, and point values.
 
 Do not reuse or rename existing task IDs if historical entries already exist.
 

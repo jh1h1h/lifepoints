@@ -24,10 +24,22 @@ class TaskTests(unittest.TestCase):
             ([{**VALID, "id": ""}], "non-empty"),
             (["wrong"], "dictionary"),
             ({}, "list"),
+            ([{**VALID, "points": True}], "finite number"),
+            ([{**VALID, "points": float("nan")}], "finite number"),
         ]
         for tasks, expected in cases:
             with self.subTest(expected=expected):
                 self.assertIn(expected, " ".join(validate(tasks)))
+
+    def test_positive_fractional_points_are_valid(self):
+        self.assertEqual(validate([{**VALID, "points": 0.3}]), [])
+        self.assertEqual(validate([{**VALID, "description": ""}]), [])
+        self.assertIn("description", " ".join(validate([{**VALID, "description": None}])))
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "tasks.py"
+            output = Path(directory) / "tasks.json"
+            source.write_text("TASKS = " + repr([{**VALID, "points": 2.5}]) + "\n")
+            self.assertEqual(json.loads(generate(source, output))[0]["points"], 2.5)
 
     def test_missing_tasks_and_invalid_generator(self):
         with tempfile.TemporaryDirectory() as directory:

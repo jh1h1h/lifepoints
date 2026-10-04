@@ -44,5 +44,20 @@ describe('backup validation', () => {
         }),
       ),
     ).toThrow('points')
+    const fractional = {
+      ...entry,
+      category: 'growth',
+      taskDescription: '',
+      configuredPoints: 0.3,
+    }
+    expect(
+      parseBackup(
+        JSON.stringify({
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          activities: [fractional],
+        }),
+      ).activities[0].configuredPoints,
+    ).toBe(0.3)
   })
 })

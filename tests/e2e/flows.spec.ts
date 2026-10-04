@@ -1,5 +1,15 @@
 import { expect, test } from '@playwright/test'
 import { readFileSync, writeFileSync } from 'node:fs'
+import type { Task } from '../../src/types'
+
+const growthTask = (
+  JSON.parse(readFileSync('src/generated/tasks.json', 'utf8')) as Task[]
+)
+  .filter((task) => task.category === 'growth' && task.points < 25)
+  .sort((a, b) => b.points - a.points)[0]
+if (!growthTask)
+  throw new Error('Browser tests require a Growth task below 25 points')
+const taskButtonName = `Add ${growthTask.name}, ${growthTask.points} points in Growth`
 
 async function signIn(page: import('@playwright/test').Page) {
   await page.goto('/')
@@ -10,7 +20,7 @@ async function signIn(page: import('@playwright/test').Page) {
   })
   await expect(
     page.getByRole('button', {
-      name: /Add Focused learning session, 5 points/,
+      name: taskButtonName,
     }),
   ).toBeVisible()
 }
@@ -22,15 +32,17 @@ test('adds an activity and persists through refresh', async ({ page }) => {
   })
   page.on('pageerror', (error) => errors.push(error.message))
   await signIn(page)
-  await page
-    .getByRole('button', { name: /Add Focused learning session, 5 points/ })
-    .click()
-  await expect(page.getByLabel('Weekly score 5 out of 100')).toBeVisible()
+  await page.getByRole('button', { name: taskButtonName }).click()
+  await expect(
+    page.getByLabel(`Weekly score ${growthTask.points} out of 100`),
+  ).toBeVisible()
   await expect(
     page.getByRole('progressbar', { name: 'Growth score' }),
-  ).toHaveAttribute('aria-valuenow', '5')
+  ).toHaveAttribute('aria-valuenow', String(growthTask.points))
   await page.reload()
-  await expect(page.getByLabel('Weekly score 5 out of 100')).toBeVisible()
+  await expect(
+    page.getByLabel(`Weekly score ${growthTask.points} out of 100`),
+  ).toBeVisible()
   expect(errors).toEqual([])
 })
 
@@ -38,10 +50,9 @@ test('caps raw activities and marks both progress bar and chart', async ({
   page,
 }) => {
   await signIn(page)
-  for (let index = 0; index < 6; index++)
-    await page
-      .getByRole('button', { name: /Add Focused learning session, 5 points/ })
-      .click()
+  const count = Math.floor(25 / growthTask.points) + 1
+  for (let index = 0; index < count; index++)
+    await page.getByRole('button', { name: taskButtonName }).click()
   await expect(page.getByLabel('Weekly score 25 out of 100')).toBeVisible()
   await expect(
     page.getByRole('progressbar', { name: 'Growth score' }),
@@ -55,7 +66,7 @@ test('caps raw activities and marks both progress bar and chart', async ({
           getComputedStyle(element.firstElementChild!).backgroundImage,
       ),
   ).toContain('repeating-linear-gradient')
-  await expect(page.locator('.activity-row')).toHaveCount(6)
+  await expect(page.locator('.activity-row')).toHaveCount(count)
   await page.getByRole('button', { name: 'History' }).click()
   await expect(
     page.locator('.chart-summary li').filter({ hasText: 'Growth 25 capped' }),
@@ -85,21 +96,21 @@ test('caps raw activities and marks both progress bar and chart', async ({
 
 test('deletion updates dashboard and history', async ({ page }) => {
   await signIn(page)
-  await page
-    .getByRole('button', { name: /Add Focused learning session, 5 points/ })
-    .click()
-  await page
-    .getByRole('button', { name: /Add Focused learning session, 5 points/ })
-    .click()
-  await expect(page.getByLabel('Weekly score 10 out of 100')).toBeVisible()
+  await page.getByRole('button', { name: taskButtonName }).click()
+  await page.getByRole('button', { name: taskButtonName }).click()
+  await expect(
+    page.getByLabel(`Weekly score ${growthTask.points * 2} out of 100`),
+  ).toBeVisible()
   await page
     .locator('.activity-row')
     .first()
     .getByRole('button', { name: 'Delete' })
     .click()
-  await expect(page.getByLabel('Weekly score 5 out of 100')).toBeVisible()
+  await expect(
+    page.getByLabel(`Weekly score ${growthTask.points} out of 100`),
+  ).toBeVisible()
   await page.getByRole('button', { name: 'History' }).click()
-  await expect(page.getByText(/: 5 \/ 100/)).toBeVisible()
+  await expect(page.getByText(`: ${growthTask.points} / 100`)).toBeVisible()
 })
 
 test('separates current and earlier weeks', async ({ page }) => {
@@ -141,9 +152,7 @@ test('separates current and earlier weeks', async ({ page }) => {
 
 test('task metadata changes only affect new activities', async ({ page }) => {
   await signIn(page)
-  await page
-    .getByRole('button', { name: /Add Focused learning session, 5 points/ })
-    .click()
+  await page.getByRole('button', { name: taskButtonName }).click()
   const path = 'src/generated/tasks.json'
   const original = readFileSync(path, 'utf8')
   try {
@@ -152,27 +161,29 @@ test('task metadata changes only affect new activities', async ({ page }) => {
       name: string
       points: number
     }[]
-    const task = tasks.find((item) => item.id === 'growth_learning')!
+    const task = tasks.find((item) => item.id === growthTask.id)!
     task.name = 'Deep learning session'
-    task.points = 8
+    task.points = growthTask.points + 3
     writeFileSync(path, JSON.stringify(tasks, null, 2) + '\n')
     await page.reload()
     await expect(
-      page.getByRole('button', { name: /Add Deep learning session, 8 points/ }),
+      page.getByRole('button', {
+        name: `Add Deep learning session, ${task.points} points in Growth`,
+      }),
     ).toBeVisible()
     await expect(
-      page
-        .locator('.activity-row')
-        .filter({ hasText: 'Focused learning session' }),
-    ).toContainText('+5')
+      page.locator('.activity-row').filter({ hasText: growthTask.name }),
+    ).toContainText(`+${growthTask.points}`)
     await page
-      .getByRole('button', { name: /Add Deep learning session, 8 points/ })
+      .getByRole('button', {
+        name: `Add Deep learning session, ${task.points} points in Growth`,
+      })
       .click()
     await expect(
       page
         .locator('.activity-row')
         .filter({ hasText: 'Deep learning session' }),
-    ).toContainText('+8')
+    ).toContainText(`+${task.points}`)
   } finally {
     writeFileSync(path, original)
   }
@@ -180,9 +191,7 @@ test('task metadata changes only affect new activities', async ({ page }) => {
 
 test('exports and imports activities', async ({ page }) => {
   await signIn(page)
-  await page
-    .getByRole('button', { name: /Add Focused learning session, 5 points/ })
-    .click()
+  await page.getByRole('button', { name: taskButtonName }).click()
   await page.getByRole('button', { name: 'Settings' }).click()
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Export JSON' }).click()
@@ -221,21 +230,21 @@ test('keeps loaded data readable and explains offline writes', async ({
   page,
 }) => {
   await signIn(page)
-  await page
-    .getByRole('button', { name: /Add Focused learning session, 5 points/ })
-    .click()
-  await expect(page.getByLabel('Weekly score 5 out of 100')).toBeVisible()
+  await page.getByRole('button', { name: taskButtonName }).click()
+  await expect(
+    page.getByLabel(`Weekly score ${growthTask.points} out of 100`),
+  ).toBeVisible()
   await expect(
     page.getByRole('button', {
-      name: /Add Focused learning session, 5 points/,
+      name: taskButtonName,
     }),
   ).toBeEnabled()
   await page.context().setOffline(true)
-  await page
-    .getByRole('button', { name: /Add Focused learning session, 5 points/ })
-    .click()
+  await page.getByRole('button', { name: taskButtonName }).click()
   await expect(page.getByText(/You appear to be offline/)).toBeVisible()
-  await expect(page.getByLabel('Weekly score 5 out of 100')).toBeVisible()
+  await expect(
+    page.getByLabel(`Weekly score ${growthTask.points} out of 100`),
+  ).toBeVisible()
 })
 
 for (const width of [375, 768, 1280])
@@ -244,7 +253,7 @@ for (const width of [375, 768, 1280])
     await signIn(page)
     await expect(
       page.getByRole('button', {
-        name: /Add Focused learning session, 5 points/,
+        name: taskButtonName,
       }),
     ).toBeVisible()
     await expect(page.getByRole('button', { name: 'History' })).toBeVisible()
@@ -252,7 +261,7 @@ for (const width of [375, 768, 1280])
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width)
     const box = await page
-      .getByRole('button', { name: /Add Focused learning session, 5 points/ })
+      .getByRole('button', { name: taskButtonName })
       .boundingBox()
     expect(box!.height).toBeGreaterThanOrEqual(44)
     await page.screenshot({

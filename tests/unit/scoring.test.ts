@@ -52,6 +52,12 @@ describe('weekly scoring', () => {
       25, 25, 25, 25,
     ])
   })
+  it('adds fractional values accurately and recognizes a decimal cap', () => {
+    const small = Array.from({ length: 10 }, () => activity('growth', 0.3))
+    expect(calculateCategoryScore(small, 'growth')).toBe(3)
+    const capped = Array.from({ length: 100 }, () => activity('growth', 0.25))
+    expect(calculateCategoryScore(capped, 'growth')).toBe(25)
+  })
   it('groups activities by category', () => {
     const groups = groupActivitiesByCategory([
       activity('life'),

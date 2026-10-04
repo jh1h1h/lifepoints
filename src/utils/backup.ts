@@ -36,7 +36,6 @@ export function parseBackup(text: string): Backup {
       'activityId',
       'taskId',
       'taskName',
-      'taskDescription',
       'timestamp',
       'createdAt',
       'updatedAt',
@@ -46,12 +45,15 @@ export function parseBackup(text: string): Backup {
     }
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(item.activityId as string))
       throw new Error('Invalid activity ID.')
+    if (typeof item.taskDescription !== 'string')
+      throw new Error('Invalid activity taskDescription.')
     if (typeof item.note !== 'string' || item.note.length > 2000)
       throw new Error('Invalid activity note.')
     if (!CATEGORIES.includes(item.category as Category))
       throw new Error('Invalid activity category.')
     if (
-      !Number.isSafeInteger(item.configuredPoints) ||
+      typeof item.configuredPoints !== 'number' ||
+      !Number.isFinite(item.configuredPoints) ||
       (item.configuredPoints as number) <= 0
     )
       throw new Error('Invalid activity points.')

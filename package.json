@@ -15,7 +15,7 @@
     "test:unit": "vitest run",
     "test:python": "python3 -m unittest discover -s tests/python",
     "test:rules": "firebase emulators:exec --project demo-lifepoints --only firestore 'vitest run --config vitest.integration.config.ts'",
-    "test:e2e": "firebase emulators:exec --project demo-lifepoints --only auth,firestore 'playwright test'",
+    "test:e2e": "npm run generate:tasks && firebase emulators:exec --project demo-lifepoints --only auth,firestore 'playwright test'",
     "validate": "npm run generate:tasks && npm run test:python && npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

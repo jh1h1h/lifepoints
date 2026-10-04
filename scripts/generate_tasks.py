@@ -2,6 +2,7 @@
 import argparse
 import importlib.util
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -22,17 +23,23 @@ def validate(tasks):
             continue
         for field in FIELDS - task.keys():
             errors.append(f"{prefix} missing {field}")
-        for field in ("id", "name", "description", "icon"):
+        for field in ("id", "name", "icon"):
             if field in task and (not isinstance(task[field], str) or not task[field].strip()):
                 errors.append(f"{prefix}.{field} must be a non-empty string")
+        if "description" in task and not isinstance(task["description"], str):
+            errors.append(f"{prefix}.description must be a string")
         if "id" in task and isinstance(task["id"], str):
             if task["id"] in seen:
                 errors.append(f"{prefix}.id duplicates {task['id']}")
             seen.add(task["id"])
         if "category" in task and (not isinstance(task["category"], str) or task["category"] not in CATEGORIES):
             errors.append(f"{prefix}.category must be one of {', '.join(sorted(CATEGORIES))}")
-        if "points" in task and (type(task["points"]) is not int or task["points"] <= 0):
-            errors.append(f"{prefix}.points must be a positive integer")
+        if "points" in task and (
+            type(task["points"]) not in (int, float)
+            or not math.isfinite(task["points"])
+            or task["points"] <= 0
+        ):
+            errors.append(f"{prefix}.points must be a positive finite number")
     return errors
 
 

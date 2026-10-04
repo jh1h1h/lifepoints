@@ -84,4 +84,16 @@ describe('Firestore ownership and data rules', () => {
       }),
     )
   })
+  it('accepts positive fractional points', async () => {
+    const store = environment.authenticatedContext('alice').firestore()
+    const reference = doc(store, 'users/alice/activities/fractional')
+    await assertSucceeds(
+      setDoc(reference, {
+        ...valid,
+        taskDescription: '',
+        configuredPoints: 0.3,
+      }),
+    )
+    expect((await getDoc(reference)).data()?.configuredPoints).toBe(0.3)
+  })
 })

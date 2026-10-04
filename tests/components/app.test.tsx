@@ -11,7 +11,14 @@ import type { User } from 'firebase/auth'
 import { Dashboard } from '../../src/pages/Dashboard'
 import { History } from '../../src/pages/History'
 import { Settings } from '../../src/pages/Settings'
-import type { Activity, ActivityInput } from '../../src/types'
+import tasksData from '../../src/generated/tasks.json'
+import type { Activity, ActivityInput, Task } from '../../src/types'
+
+const growthTask = (tasksData as Task[]).find(
+  (task) => task.category === 'growth',
+)
+if (!growthTask) throw new Error('Component tests require a Growth task')
+const taskButtonName = `Add ${growthTask.name}, ${growthTask.points} points in Growth`
 
 vi.mock('../../src/components/HistoryCharts', () => ({
   HistoryCharts: () => <div>Charts</div>,
@@ -80,7 +87,7 @@ describe('dashboard', () => {
     expect(screen.getAllByText('0 / 25')).toHaveLength(4)
     expect(
       screen.getByRole('button', {
-        name: /Add Focused learning session, 5 points/,
+        name: taskButtonName,
       }),
     ).toBeVisible()
   })
@@ -88,16 +95,20 @@ describe('dashboard', () => {
     render(<TestDashboard />)
     fireEvent.click(
       screen.getByRole('button', {
-        name: /Add Focused learning session, 5 points/,
+        name: taskButtonName,
       }),
     )
     await waitFor(() =>
-      expect(screen.getByLabelText('Weekly score 5 out of 100')).toBeVisible(),
+      expect(
+        screen.getByLabelText(
+          `Weekly score ${Math.min(growthTask.points, 25)} out of 100`,
+        ),
+      ).toBeVisible(),
     )
-    expect(screen.getByText('5 / 25')).toBeVisible()
     expect(
-      screen.getAllByText('Focused learning session').length,
-    ).toBeGreaterThan(0)
+      screen.getByText(`${Math.min(growthTask.points, 25)} / 25`),
+    ).toBeVisible()
+    expect(screen.getAllByText(growthTask.name).length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'Edit note' }))
     fireEvent.change(screen.getByLabelText('Note'), {
       target: { value: 'A useful lesson' },
@@ -115,13 +126,15 @@ describe('dashboard', () => {
     render(<TestDashboard />)
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Add Focused learning session with a note',
+        name: `Add ${growthTask.name} with a note`,
       }),
     )
     fireEvent.change(screen.getByLabelText('Optional note'), {
       target: { value: 'Practised a new skill' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'Add +5' }))
+    fireEvent.click(
+      screen.getByRole('button', { name: `Add +${growthTask.points}` }),
+    )
     await waitFor(() =>
       expect(screen.getByText('Practised a new skill')).toBeVisible(),
     )

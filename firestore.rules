@@ -7,9 +7,9 @@ service cloud.firestore {
         && data.keys().hasOnly(['taskId', 'taskName', 'taskDescription', 'category', 'configuredPoints', 'timestamp', 'note', 'createdAt', 'updatedAt'])
         && data.taskId is string && data.taskId.size() > 0
         && data.taskName is string && data.taskName.size() > 0
-        && data.taskDescription is string && data.taskDescription.size() > 0
+        && data.taskDescription is string
         && data.category in ['growth', 'people', 'life', 'play']
-        && data.configuredPoints is int && data.configuredPoints > 0
+        && data.configuredPoints is number && data.configuredPoints > 0
         && data.timestamp is string && data.timestamp.size() > 0
         && data.note is string && data.note.size() <= 2000
         && data.createdAt is string && data.updatedAt is string;
