@@ -47,9 +47,6 @@ test('offers a model-chosen edit even when the request is phrased as a question'
   const proposal = page.getByRole('region', { name: 'add proposal for Kevin' })
   await expect(proposal).toBeVisible()
   await expect(proposal.getByText('Pending approval')).toBeVisible()
-  await expect(
-    proposal.getByText(/Nothing is saved until you approve/),
-  ).toBeVisible()
   await proposal.getByRole('button', { name: 'Approve change' }).click()
   await expect(page.getByText(/Saved Kevin, revision 2/)).toBeVisible()
 })

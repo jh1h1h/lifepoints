@@ -115,13 +115,6 @@ export function ActionPreview({
         </a>
       )}
       {action.reason && <p className="muted">{action.reason}</p>}
-      {status === 'pending' && (
-        <p className="muted">
-          Is this what you meant? Approve, edit the proposed text where
-          available, or reject and explain the correction in chat. Nothing is
-          saved until you approve.
-        </p>
-      )}
       {action.action === 'create' && (
         <div className="preview-change">
           <strong>Initial document</strong>
