@@ -170,6 +170,43 @@ h3 {
 .docs-page {
   max-width: 860px;
 }
+.docs-assistant {
+  display: grid;
+  gap: 12px;
+}
+.docs-check {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+}
+.docs-check input {
+  width: 18px;
+  height: 18px;
+}
+.ai-proposal {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  border-top: 1px solid #e0e7e1;
+  padding-top: 20px;
+}
+.ai-preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr));
+  gap: 12px;
+}
+.ai-preview > div {
+  min-width: 0;
+  border: 1px solid #e0e7e1;
+  border-radius: 12px;
+  padding: 12px;
+}
+.ai-preview pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  margin-bottom: 0;
+}
 .docs-heading {
   display: flex;
   align-items: start;

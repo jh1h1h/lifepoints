@@ -45,6 +45,37 @@ export interface DocEdit {
   afterAliases: string[]
 }
 
+export interface AiChoice {
+  entityId: string
+  entityType: EntityType
+  name: string
+}
+
+export type AiResult =
+  | { kind: 'query'; action: 'query'; answer: string; requestId: string }
+  | {
+      kind: 'clarify'
+      action: 'clarify'
+      question: string
+      choices: AiChoice[]
+      conversationId: string
+    }
+  | {
+      kind: 'proposal'
+      action: 'create' | 'add' | 'modify' | 'delete'
+      proposalId: string
+      requestId: string
+      expiresAt: string
+      proposal: {
+        scope?: 'content' | 'entity'
+        newText?: string
+        content?: string
+        reason?: string
+        changeType?: ChangeType
+      }
+      preview: { before: string; after: string }
+    }
+
 type Action =
   | 'list'
   | 'get'
@@ -69,6 +100,54 @@ async function call<T>(
 }
 
 export const docsService = {
+  async interpretMessage(
+    message: string,
+    includeFullHistory: boolean,
+    conversationId?: string,
+    requestId: string = crypto.randomUUID(),
+  ) {
+    if (!functions) throw new Error('Firebase is not configured.')
+    const callable = httpsCallable<Record<string, unknown>, AiResult>(
+      functions,
+      'interpretMessage',
+      {
+        timeout: 120000,
+      },
+    )
+    const result = await callable({
+      message,
+      includeFullHistory,
+      ...(conversationId ? { conversationId } : {}),
+      requestId,
+    })
+    return result.data
+  },
+  async approveAction(
+    proposalId: string,
+    replacementText?: string,
+    approvalRequestId: string = crypto.randomUUID(),
+  ) {
+    if (!functions) throw new Error('Firebase is not configured.')
+    const callable = httpsCallable<
+      Record<string, unknown>,
+      { entityId: string; revision: number; status: string }
+    >(functions, 'approveAction')
+    const result = await callable({
+      proposalId,
+      ...(replacementText !== undefined ? { replacementText } : {}),
+      approvalRequestId,
+    })
+    return result.data
+  },
+  async rejectAction(proposalId: string) {
+    if (!functions) throw new Error('Firebase is not configured.')
+    const callable = httpsCallable<Record<string, unknown>, { status: string }>(
+      functions,
+      'rejectAction',
+    )
+    const result = await callable({ proposalId })
+    return result.data
+  },
   async list(entityType: EntityType) {
     return (await call<{ entities: DocEntity[] }>('list', { entityType }))
       .entities

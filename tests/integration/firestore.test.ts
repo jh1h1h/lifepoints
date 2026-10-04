@@ -159,4 +159,25 @@ describe('Firestore ownership and data rules', () => {
       setDoc(doc(alice, 'users/alice/docOperations/op123456'), {}),
     )
   })
+  it('keeps AI proposals, requests, approvals, and conversations server-only', async () => {
+    const alice = environment.authenticatedContext('alice').firestore()
+    const bob = environment.authenticatedContext('bob').firestore()
+    const guest = environment.unauthenticatedContext().firestore()
+    for (const collection of [
+      'aiProposals',
+      'aiRequests',
+      'aiApprovals',
+      'aiConversations',
+    ]) {
+      const path = `users/alice/${collection}/private123`
+      await environment.withSecurityRulesDisabled(async (context) => {
+        await setDoc(doc(context.firestore(), path), { status: 'pending' })
+      })
+      await assertFails(getDoc(doc(alice, path)))
+      await assertFails(getDoc(doc(bob, path)))
+      await assertFails(getDoc(doc(guest, path)))
+      await assertFails(setDoc(doc(alice, path), { status: 'approved' }))
+      await assertFails(deleteDoc(doc(alice, path)))
+    }
+  })
 })

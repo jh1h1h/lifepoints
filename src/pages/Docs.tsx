@@ -6,11 +6,212 @@ import {
   type DocEdit,
   type DocEntity,
   type EntityType,
+  type AiResult,
 } from '../services/docsService'
 import { href, navigate } from '../utils/routes'
 
 function docPath(type: EntityType, id?: string) {
   return `/docs/${type === 'friend' ? 'friends' : 'projects'}${id ? `/${id}` : ''}`
+}
+
+function DocsAssistant() {
+  const [message, setMessage] = useState('')
+  const [includeFullHistory, setIncludeFullHistory] = useState(false)
+  const [conversationId, setConversationId] = useState<string>()
+  const [result, setResult] = useState<AiResult | null>(null)
+  const [replacement, setReplacement] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const messageRequestId = useRef<string | null>(null)
+  const approvalRequestId = useRef<string | null>(null)
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault()
+    if (!message.trim()) return
+    setBusy(true)
+    setError('')
+    setConfirmation('')
+    try {
+      messageRequestId.current ??= crypto.randomUUID()
+      const next = await docsService.interpretMessage(
+        message,
+        includeFullHistory,
+        conversationId,
+        messageRequestId.current,
+      )
+      messageRequestId.current = null
+      setResult(next)
+      setConversationId(
+        next.kind === 'clarify' ? next.conversationId : undefined,
+      )
+      setReplacement(
+        next.kind === 'proposal'
+          ? (next.proposal.newText ?? next.proposal.content ?? '')
+          : '',
+      )
+      setMessage('')
+    } catch (cause) {
+      setError(readableDocError(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function decide(approve: boolean) {
+    if (result?.kind !== 'proposal') return
+    setBusy(true)
+    setError('')
+    try {
+      if (approve) {
+        const editable =
+          result.action === 'create' ||
+          result.action === 'add' ||
+          result.action === 'modify'
+        approvalRequestId.current ??= crypto.randomUUID()
+        const saved = await docsService.approveAction(
+          result.proposalId,
+          editable ? replacement : undefined,
+          approvalRequestId.current,
+        )
+        approvalRequestId.current = null
+        setConfirmation(`Saved revision ${saved.revision}.`)
+      } else {
+        await docsService.rejectAction(result.proposalId)
+        setConfirmation('Suggestion discarded.')
+      }
+      setResult(null)
+    } catch (cause) {
+      setError(readableDocError(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section
+      className="card docs-panel docs-assistant"
+      aria-label="Docs assistant"
+    >
+      <h2>Ask or suggest a change</h2>
+      <p className="muted">
+        Answers are read-only. Document changes always wait for your approval.
+        Relevant documents are sent to DeepSeek for interpretation.
+      </p>
+      <form onSubmit={submit} className="docs-form">
+        <label>
+          Message
+          <textarea
+            rows={3}
+            maxLength={4000}
+            value={message}
+            onChange={(event) => {
+              setMessage(event.target.value)
+              messageRequestId.current = null
+            }}
+          />
+        </label>
+        <label className="docs-check">
+          <input
+            type="checkbox"
+            checked={includeFullHistory}
+            onChange={(event) => {
+              setIncludeFullHistory(event.target.checked)
+              messageRequestId.current = null
+            }}
+          />
+          Include full edit history
+        </label>
+        <button className="primary" disabled={busy || !message.trim()}>
+          {busy ? 'Working…' : 'Send'}
+        </button>
+      </form>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      {confirmation && <p role="status">{confirmation}</p>}
+      {result?.kind === 'query' && (
+        <p className="doc-content">{result.answer}</p>
+      )}
+      {result?.kind === 'clarify' && (
+        <div>
+          <p>{result.question}</p>
+          {result.choices.length > 0 && (
+            <ul>
+              {result.choices.map((choice) => (
+                <li key={choice.entityId}>
+                  {choice.name} ({choice.entityType})
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="muted">Reply in the message box to clarify.</p>
+        </div>
+      )}
+      {result?.kind === 'proposal' && (
+        <div className="ai-proposal">
+          <h3>Review {result.action} suggestion</h3>
+          {result.proposal.reason && <p>{result.proposal.reason}</p>}
+          <p className="muted">
+            Change type:{' '}
+            {result.proposal.changeType?.replace('_', ' ') ?? 'unspecified'}
+          </p>
+          {result.action === 'delete' && result.proposal.scope === 'entity' && (
+            <p className="error">
+              This approval will hide the entire document. Its edit history
+              remains available.
+            </p>
+          )}
+          <p className="muted">
+            Original suggestion preview. If you edit the text below, your edited
+            text is applied within the same target and scope.
+          </p>
+          <div className="ai-preview">
+            <div>
+              <strong>Current document</strong>
+              <pre>{result.preview.before || '(empty)'}</pre>
+            </div>
+            <div>
+              <strong>Proposed document</strong>
+              <pre>{result.preview.after || '(empty)'}</pre>
+            </div>
+          </div>
+          {(result.action === 'create' ||
+            result.action === 'add' ||
+            result.action === 'modify') && (
+            <label>
+              Proposed{' '}
+              {result.action === 'create'
+                ? 'initial content'
+                : 'replacement text'}
+              <textarea
+                rows={5}
+                value={replacement}
+                onChange={(event) => {
+                  setReplacement(event.target.value)
+                  approvalRequestId.current = null
+                }}
+              />
+            </label>
+          )}
+          <div className="docs-actions">
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => void decide(true)}
+            >
+              Approve
+            </button>
+            <button disabled={busy} onClick={() => void decide(false)}>
+              Reject
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  )
 }
 
 function Link({ to, children }: { to: string; children: React.ReactNode }) {
@@ -570,6 +771,7 @@ export function Docs({ path }: { path: string }) {
           <Link to="/docs/friends">Friends</Link>
           <Link to="/docs/projects">Projects</Link>
         </div>
+        <DocsAssistant />
       </main>
     )
   const type =

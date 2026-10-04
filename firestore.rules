@@ -58,5 +58,17 @@ service cloud.firestore {
     match /users/{uid}/docOperations/{operationId} {
       allow read, write: if false;
     }
+    match /users/{uid}/aiProposals/{proposalId} {
+      allow read, write: if false;
+    }
+    match /users/{uid}/aiRequests/{requestId} {
+      allow read, write: if false;
+    }
+    match /users/{uid}/aiApprovals/{approvalId} {
+      allow read, write: if false;
+    }
+    match /users/{uid}/aiConversations/{conversationId} {
+      allow read, write: if false;
+    }
   }
 }

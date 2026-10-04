@@ -30,7 +30,7 @@ Because GitHub Pages serves public JavaScript, both first-login seed lists are v
 
 1. Create a Firebase project and register a Web app. Copy its config values into `.env` using `.env.example` as the template. Firebase web API keys identify the project; Firestore rules enforce access.
 2. In Authentication, enable the Google provider. Add `localhost` and every deployed GitHub Pages domain to Authentication → Settings → Authorized domains. For a repository site, the domain is `USERNAME.github.io`.
-3. Create a Firestore database. Upgrade the project to the Blaze plan to deploy second-generation Cloud Functions. Deploy the rules and the Python callable with `npx firebase-tools deploy --only firestore:rules,functions --project YOUR_PROJECT_ID` after logging in with `npx firebase-tools login`.
+3. Create a Firestore database. Upgrade the project to the Blaze plan to deploy second-generation Cloud Functions. Store the DeepSeek key with `npx firebase-tools functions:secrets:set DEEPSEEK_API_KEY --project YOUR_PROJECT_ID` (enter it at the private prompt). Deploy the rules and Python callables with `npx firebase-tools deploy --only firestore:rules,functions --project YOUR_PROJECT_ID` after logging in with `npx firebase-tools login`. Never put this key in `.env`, a `VITE_` variable, GitHub Actions, or Firestore.
 4. Refresh the app and sign in with Google. Firebase Auth persists the session across refreshes. Each user reads and writes only their own Points documents; Docs writes are authenticated callable operations that use the token's UID.
 
 The activity documents store `taskId`, `taskName`, `taskDescription`, `category`, `configuredPoints`, ISO `timestamp`, `note`, `createdAt`, and `updatedAt`. The document ID and authenticated path provide the activity ID and owner UID. Rules permit later edits only to `note` and `updatedAt`, keeping task snapshots fixed.
@@ -51,7 +51,19 @@ The Docs section uses `users/{uid}/docs/{autoId}` for current records, with `ent
 
 Every creation, changed content, rename, alias edit, and soft deletion atomically writes an event under `users/{uid}/docs/{autoId}/edits/{operationId}`. Creation is revision 0→1, even for empty content. Each event has a deterministic line delta, SHA-256 before/after hashes, source (`manual` in this phase), change type, and revision metadata. `functions/docs_delta.py` applies and verifies each patch independently of any AI model; missing or corrupted history is rejected. Soft deletion hides a record from lists but retains the record and all edits. Saving unchanged content creates no new revision.
 
-The authenticated `docs_api` callable is the only Docs write path. It checks the expected revision in a Firestore transaction, rejects stale edits, and stores a per-user operation record at `users/{uid}/docOperations/{operationId}` so retries with the same request cannot duplicate an edit. The UID comes from Firebase Auth, never from the browser request. Firestore rules grant only owner reads of Docs and edits and deny all direct client writes; the Admin SDK in the callable performs validated writes. No AI integration, Docs backup/import/export, or general recovery feature is included in this phase.
+The authenticated `docs_api` callable handles manual Docs writes. It checks the expected revision in a Firestore transaction, rejects stale edits, and stores a per-user operation record at `users/{uid}/docOperations/{operationId}` so retries with the same request cannot duplicate an edit. The UID comes from Firebase Auth, never from the browser request. Firestore rules grant only owner reads of Docs and edits and deny all direct client writes; the Admin SDK in the callables performs validated writes. Docs backup/import/export and general recovery are not included.
+
+## Docs AI and approval
+
+On the Docs overview, enter a question or a proposed change. The **Include full edit history** checkbox defaults off. Current-only mode retrieves matching current records without reading edits; full-history mode verifies and sends complete, chronological deltas for matching entities. If relevant history exceeds `AI_MAX_CONTEXT_CHARS` (default 45,000 characters), interpretation fails instead of truncating it. Ambiguous names yield candidate choices; the conversation ID is retained for a bounded follow-up. A query or clarification never writes an entity.
+
+`interpretMessage` invokes DeepSeek from the Python backend only. The default model is `deepseek-v4-pro` at `https://api.deepseek.com`, using JSON mode, non-thinking responses, a 45-second timeout, and a 1,400-token output limit. The Python action engine strictly parses exactly one `create`, `add`, `modify`, `delete`, `query`, or `clarify` action. It checks retrieved IDs, revisions, exact text spans, scope, duplicate names, and source references. Versioned instructions live in `functions/ai_prompt.py`; the model is never allowed to execute tools or write Firestore. `DEEPSEEK_MODEL`, `DEEPSEEK_TIMEOUT_SECONDS`, `DEEPSEEK_MAX_OUTPUT_TOKENS`, `DEEPSEEK_MAX_RETRIES`, and `AI_MAX_CONTEXT_CHARS` are optional **backend-only** configuration variables.
+
+Mutations become pending server-generated proposals at `users/{uid}/aiProposals/{proposalId}` for 24 hours. They do **not** update Docs until approved. `approveAction` verifies owner, status, expiry, revision, and original content, then commits the edit delta, current record, approval result, and proposal status in one Firestore transaction. The user may edit the proposed replacement text, but the target and exact scope stay fixed. `rejectAction` discards a pending proposal. Per-user `aiRequests` and `aiApprovals` records prevent duplicate interpretations and approvals; all AI bookkeeping is inaccessible to browser Firestore clients. AI-approved edit events are marked `ai_approved`.
+
+DeepSeek's [Chat Completions API](https://api-docs.deepseek.com/api/create-chat-completion/) documents the JSON output, model and thinking-mode parameters used here. Timeouts are not retried automatically because the provider may have completed a billable response; reuse the same request ID to inspect a saved completed result. The browser-facing interface in this phase is deliberately simple; Prompt 3 will provide the polished chat interaction.
+
+The optional live evaluation uses synthetic data only and **is never run in CI**. Supply `DEEPSEEK_API_KEY` securely in your local environment (avoid putting its value in shell history), then run `functions/venv/bin/python functions/live_eval.py --max-calls 3 --max-usd 0.10`. It reports case pass/fail, latency, token usage, and an estimated running cost. Its budget is a preflight estimate, not an API-enforced hard spending limit; timeouts and provider pricing changes may affect actual charges. Check [current DeepSeek pricing](https://api-docs.deepseek.com/quick_start/pricing/) before using it.
 
 The Functions emulator uses anonymous credentials only when `FIRESTORE_EMULATOR_HOST` is set; no local Google Application Default Credentials or service-account key is needed for these tests. Deployed Functions continue to use the Firebase Admin SDK's normal credentials.
 
@@ -63,6 +75,7 @@ npm run lint
 npm run typecheck
 npm run test:rules       # Firestore emulator security tests; requires Java
 npm run test:docs        # pytest delta and transaction tests against Firestore emulator
+functions/venv/bin/python -m pytest tests/python/test_ai_provider.py -q  # provider/schema unit tests
 npx playwright install --only-shell chromium
 npm run test:e2e         # auth + Firestore + Functions emulators and browser flows
 npm run validate         # lint, types, Vitest, build
@@ -73,6 +86,10 @@ Emulator and browser tests use the local Firebase emulators with a demo project 
 ### Verification for Docs phase (2026-10-04)
 
 Lint, Prettier, TypeScript, 32 Vitest tests, 8 Firestore rules tests, 9 Python tests (including emulator transactions), 18 Playwright tests, and a production build with `VITE_BASE_PATH=/lifepoints/` passed locally. The browser tests also passed with `GOOGLE_APPLICATION_CREDENTIALS` set to a nonexistent path, reproducing a CI runner without local ADC. The build produced identical `index.html` and `404.html` files with `/lifepoints/` asset URLs. Docs screens were visually inspected at 375px and 1280px; browser tests also checked 768px and no horizontal overflow. Cloud deployment and real Google sign-in were not exercised locally and require the Firebase/Pages configuration above.
+
+### Verification for AI approval phase (2026-10-04)
+
+Lint, TypeScript, 34 Vitest tests, 9 Firestore rules tests, 34 Python tests (including Firestore emulator approval transactions), 18 Playwright tests, Prettier, and a production build with `/lifepoints/` assets passed locally. The build's `index.html` and `404.html` matched. The browser suite covered the Docs overview at 375, 768, and 1280 pixels without horizontal scrolling. The optional paid DeepSeek evaluation was **not** run because no API key or spend authorization was supplied; deterministic mocked-provider and emulator tests passed. Cloud deployment and real Google sign-in were not exercised.
 
 ## Backups
 

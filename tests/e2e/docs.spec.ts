@@ -114,6 +114,12 @@ test('Points and Docs navigation remains usable at mobile and desktop widths', a
     await expect(
       page.getByRole('heading', { name: 'Your documents' }),
     ).toBeVisible()
+    await expect(page.getByLabel('Message')).toBeVisible()
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true)
     await page.getByRole('link', { name: 'Friends' }).click()
     await expect(page.getByRole('button', { name: 'New friend' })).toBeVisible()
     if (width !== 768) {
