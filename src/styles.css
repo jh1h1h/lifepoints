@@ -838,6 +838,25 @@ h3 {
   padding: 24px;
   min-width: 0;
 }
+.chart-card--weekly {
+  background: #fcfdf9;
+  border-color: #d7e4d7;
+}
+.chart-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.chart-cap-pill {
+  flex: none;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: #e9f1e8;
+  color: #315b44;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
 .chart-card h2 {
   margin-bottom: 8px;
 }

@@ -39,17 +39,24 @@ export function HistoryCharts({ rows }: { rows: WeekChartRow[] }) {
             rows[context.dataIndex]?.categories[category].isCapped ?? false,
           )
         },
-        borderColor: CATEGORY_COLORS[category],
-        borderWidth: 1,
+        borderColor: '#ffffff',
+        borderWidth: 2,
         borderSkipped: false,
+        borderRadius: 7,
+        maxBarThickness: 70,
+        categoryPercentage: 0.76,
+        barPercentage: 0.82,
       })),
     }),
     [rows],
   )
   return (
     <>
-      <section className="card chart-card">
-        <h2>Weekly total</h2>
+      <section className="card chart-card chart-card--weekly">
+        <div className="chart-heading">
+          <h2>Weekly total</h2>
+          <span className="chart-cap-pill">100 max</span>
+        </div>
         <p className="muted">
           Each bar shows up to 100 points. Striped = weekly category cap
           reached.
@@ -109,6 +116,10 @@ function CategoryChart({
         borderColor: CATEGORY_COLORS[category],
         borderWidth: 1,
         borderSkipped: false,
+        borderRadius: 7,
+        maxBarThickness: 70,
+        categoryPercentage: 0.76,
+        barPercentage: 0.82,
       },
     ],
   }
