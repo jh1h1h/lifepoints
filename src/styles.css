@@ -170,10 +170,30 @@ h3 {
 .docs-page {
   max-width: 860px;
 }
+.docs-chat-page {
+  height: calc(100vh - 73px);
+  height: calc(100dvh - 73px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+  padding-bottom: 16px;
+  overflow: hidden;
+}
+.docs-chat-page .docs-tabs {
+  flex: none;
+}
 .docs-chat {
   display: grid;
-  gap: 18px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  flex: 1;
+  min-height: 0;
+  gap: 12px;
   min-width: 0;
+}
+.docs-chat.has-messages {
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 .chat-intro h1 {
   margin-bottom: 10px;
@@ -186,7 +206,7 @@ h3 {
   display: grid;
   align-content: start;
   gap: 22px;
-  max-height: min(65vh, 740px);
+  min-height: 0;
   overflow-y: auto;
   padding: 4px;
   min-width: 0;
@@ -254,9 +274,7 @@ h3 {
   border: 1px solid #d7e0d8;
   border-radius: 18px;
   padding: 16px;
-}
-.chat-composer > label:first-child {
-  font-weight: 700;
+  min-height: 0;
 }
 .chat-composer textarea,
 .preview-editor textarea,
@@ -1069,6 +1087,15 @@ h3 {
   }
 }
 @media (max-width: 580px) {
+  .docs-chat-page {
+    height: calc(100vh - 67px);
+    height: calc(100dvh - 67px);
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  .chat-composer {
+    padding: 12px;
+  }
   .container {
     width: min(100% - 24px, 1120px);
   }

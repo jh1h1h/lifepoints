@@ -95,60 +95,6 @@ const EMPTY_SESSION: ChatSession = {
   includeFullHistory: false,
 }
 
-function sessionKey(uid: string) {
-  return `lifepoints-docs-chat:${uid}`
-}
-
-function loadSession(uid: string): ChatSession {
-  try {
-    const raw = sessionStorage.getItem(sessionKey(uid))
-    if (!raw) return EMPTY_SESSION
-    const value: unknown = JSON.parse(raw)
-    if (
-      typeof value !== 'object' ||
-      value === null ||
-      !('entries' in value) ||
-      !Array.isArray(value.entries)
-    )
-      return EMPTY_SESSION
-    const candidate = value as Partial<ChatSession>
-    const entries = value.entries
-      .filter((item: unknown): item is ChatEntry => {
-        if (typeof item !== 'object' || item === null) return false
-        const entry = item as Partial<ChatEntry>
-        return (
-          typeof entry.id === 'string' &&
-          typeof entry.userMessage === 'string' &&
-          typeof entry.requestId === 'string' &&
-          typeof entry.includeFullHistory === 'boolean' &&
-          typeof entry.status === 'string'
-        )
-      })
-      .slice(-40)
-      .map((entry: ChatEntry) => {
-        if (entry.status === 'thinking' || entry.status === 'applying')
-          return {
-            ...entry,
-            status: 'failed' as const,
-            error:
-              'The previous request may have completed. Retry to check the same request ID.',
-          }
-        return entry
-      })
-    return {
-      entries,
-      draft: typeof candidate.draft === 'string' ? candidate.draft : '',
-      includeFullHistory: candidate.includeFullHistory === true,
-      activeConversationId:
-        typeof candidate.activeConversationId === 'string'
-          ? candidate.activeConversationId
-          : undefined,
-    }
-  } catch {
-    return EMPTY_SESSION
-  }
-}
-
 function staleError(error: unknown): boolean {
   const text =
     error instanceof Error
@@ -195,32 +141,15 @@ function statusLabel(status: ChatStatus): string {
   }[status]
 }
 
-export function DocsChat({ uid }: { uid: string }) {
-  const [session, setSession] = useState<ChatSession>(() => loadSession(uid))
+export function DocsChat() {
+  const [session, setSession] = useState<ChatSession>(EMPTY_SESSION)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
-  const endRef = useRef<HTMLDivElement | null>(null)
+  const logRef = useRef<HTMLDivElement | null>(null)
   const { entries, draft, includeFullHistory, activeConversationId } = session
 
   useEffect(() => {
-    try {
-      sessionStorage.setItem(
-        sessionKey(uid),
-        JSON.stringify({
-          ...session,
-          entries: session.entries.map((entry) => {
-            const saved = { ...entry }
-            delete saved.errorDetails
-            return saved
-          }),
-        }),
-      )
-    } catch {
-      /* Private browsing may deny storage. */
-    }
-  }, [session, uid])
-  useEffect(() => {
-    endRef.current?.scrollIntoView?.({ block: 'end' })
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [entries])
 
   function patchEntry(id: string, patch: Partial<ChatEntry>) {
@@ -402,17 +331,23 @@ export function DocsChat({ uid }: { uid: string }) {
   }
 
   return (
-    <section className="docs-chat" aria-label="Docs chat">
-      <header className="chat-intro">
-        <p className="eyebrow">Docs · Chat</p>
-        <h1>What would you like to remember?</h1>
-        <p className="muted">
-          Ask a question or describe a change. You approve every suggested edit
-          before it is saved. Relevant documents are sent to DeepSeek.
-        </p>
-      </header>
+    <section
+      className={`docs-chat${entries.length ? ' has-messages' : ''}`}
+      aria-label="Docs chat"
+    >
+      {entries.length === 0 && (
+        <header className="chat-intro">
+          <p className="eyebrow">Docs · Chat</p>
+          <h1>What would you like to remember?</h1>
+          <p className="muted">
+            Ask a question or describe a change. You approve every suggested
+            edit before it is saved. Relevant documents are sent to DeepSeek.
+          </p>
+        </header>
+      )}
       <div
         className="chat-log"
+        ref={logRef}
         role="log"
         aria-label="Conversation"
         aria-live="polite"
@@ -587,7 +522,7 @@ export function DocsChat({ uid }: { uid: string }) {
                   )}
                   <p className="muted">
                     Raw responses may contain excerpts from your documents.
-                    These details are not saved in this browser session.
+                    These details stay in memory only while this chat is open.
                   </p>
                 </details>
               )}
@@ -656,7 +591,6 @@ export function DocsChat({ uid }: { uid: string }) {
             </div>
           </div>
         ))}
-        <div ref={endRef} />
       </div>
       <form
         className="chat-composer"
@@ -665,9 +599,9 @@ export function DocsChat({ uid }: { uid: string }) {
           send()
         }}
       >
-        <label htmlFor="docs-message">Message</label>
         <textarea
           id="docs-message"
+          aria-label="Message"
           rows={3}
           maxLength={4000}
           value={draft}

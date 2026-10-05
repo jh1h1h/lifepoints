@@ -33,6 +33,38 @@ test('explains rejected model output and exposes the raw response only when expa
   ).toHaveCount(0)
 })
 
+test('keeps the composer within the viewport and does not persist chat on reload', async ({
+  page,
+}) => {
+  await signIn(page)
+  await ask(page, 'Where does Kevin work?')
+  await expect(
+    page.getByRole('heading', { name: 'What would you like to remember?' }),
+  ).toHaveCount(0)
+  for (const width of [375, 768, 1280]) {
+    await page.setViewportSize({ width, height: 700 })
+    const position = await page
+      .getByRole('textbox', { name: 'Message' })
+      .boundingBox()
+    expect(position).not.toBeNull()
+    expect(position!.y).toBeGreaterThanOrEqual(0)
+    expect(position!.y + position!.height).toBeLessThanOrEqual(700)
+    const pageSize = await page.evaluate(() => ({
+      viewport: window.innerHeight,
+      document: document.documentElement.scrollHeight,
+      body: document.body.scrollHeight,
+      header: document.querySelector('.site-header')?.getBoundingClientRect().height,
+      main: document.querySelector('.docs-chat-page')?.getBoundingClientRect().toJSON(),
+    }))
+    expect(pageSize.document, JSON.stringify(pageSize)).toBeLessThanOrEqual(pageSize.viewport)
+  }
+  await page.reload()
+  await expect(
+    page.getByRole('heading', { name: 'What would you like to remember?' }),
+  ).toBeVisible()
+  await expect(page.getByText('Where does Kevin work?')).toHaveCount(0)
+})
+
 test('offers a model-chosen edit even when the request is phrased as a question', async ({
   page,
 }) => {

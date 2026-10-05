@@ -14,3 +14,4 @@ __pycache__/
 *.tsbuildinfo
 functions/venv/
 .pytest_cache/
+deepseek-eval-results*.json

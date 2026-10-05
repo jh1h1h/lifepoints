@@ -60,7 +60,6 @@ const edit: DocEdit = {
 }
 
 beforeEach(() => {
-  sessionStorage.clear()
   vi.mocked(docsService.interpretMessage).mockReset()
   vi.mocked(docsService.approveAction).mockClear()
   vi.mocked(docsService.rejectAction).mockClear()
@@ -213,9 +212,32 @@ describe('Docs interface', () => {
     expect(screen.getByText('<script>alert("unsafe")</script>')).toBeVisible()
     expect(screen.getByText('request-diagnostic')).toBeVisible()
     expect(docsService.approveAction).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem('lifepoints-docs-chat:test-user')).toBeNull()
+  })
+  it('keeps the conversation in memory only and hides the intro once messages appear', async () => {
+    const view = render(<Docs path="/docs" uid="test-user" />)
     expect(
-      sessionStorage.getItem('lifepoints-docs-chat:test-user'),
-    ).not.toContain('rawResponse')
+      screen.getByRole('heading', { name: 'What would you like to remember?' }),
+    ).toBeVisible()
+    expect(screen.getByLabelText('Message')).toBeVisible()
+    expect(screen.queryByText('Message')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Where does Kevin work?' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    expect(await screen.findByText('Apple')).toBeVisible()
+    expect(
+      screen.queryByRole('heading', {
+        name: 'What would you like to remember?',
+      }),
+    ).not.toBeInTheDocument()
+    expect(sessionStorage.getItem('lifepoints-docs-chat:test-user')).toBeNull()
+    view.unmount()
+    render(<Docs path="/docs" uid="test-user" />)
+    expect(
+      screen.getByRole('heading', { name: 'What would you like to remember?' }),
+    ).toBeVisible()
+    expect(screen.queryByText('Apple')).not.toBeInTheDocument()
   })
   it('offers a read-only query and an explicit approval for proposed changes', async () => {
     render(<Docs path="/docs" uid="test-user" />)

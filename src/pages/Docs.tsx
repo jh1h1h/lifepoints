@@ -593,13 +593,13 @@ function DocsNav({ active }: { active: 'chat' | 'friends' | 'projects' }) {
   )
 }
 
-export function Docs({ path, uid }: { path: string; uid: string }) {
+export function Docs({ path }: { path: string; uid: string }) {
   const segments = path.split('/').filter(Boolean)
   if (segments.length === 1)
     return (
-      <main className="container page docs-page">
+      <main className="container page docs-page docs-chat-page">
         <DocsNav active="chat" />
-        <DocsChat uid={uid} />
+        <DocsChat />
       </main>
     )
   const type =
