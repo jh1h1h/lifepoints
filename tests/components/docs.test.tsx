@@ -292,6 +292,9 @@ describe('Docs interface', () => {
         undefined,
       ),
     )
+    expect(await screen.findByText(/Saved Kevin, revision 2/)).toBeVisible()
+    expect(screen.queryByText('Applied')).not.toBeInTheDocument()
+    expect(document.querySelector('.chat-meta')).toBeNull()
   })
   it('does not submit duplicate approval calls on repeated clicks', async () => {
     vi.mocked(docsService.interpretMessage).mockResolvedValueOnce({

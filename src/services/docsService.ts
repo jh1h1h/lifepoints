@@ -165,6 +165,7 @@ export const docsService = {
     const result = await callable({
       message,
       includeFullHistory,
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
       ...(conversationId ? { conversationId } : {}),
       ...(selectedEntityId ? { selectedEntityId } : {}),
       requestId,

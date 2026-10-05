@@ -127,20 +127,6 @@ function aiError(error: unknown): string {
   return readableDocError(error)
 }
 
-function statusLabel(status: ChatStatus): string {
-  return {
-    thinking: 'Thinking',
-    pending: 'Pending approval',
-    query: 'Answered',
-    clarify: 'Needs clarification',
-    applying: 'Applying',
-    applied: 'Applied',
-    rejected: 'Rejected',
-    failed: 'Failed',
-    stale: 'Stale',
-  }[status]
-}
-
 export function DocsChat() {
   const [session, setSession] = useState<ChatSession>(EMPTY_SESSION)
   const [busy, setBusy] = useState(false)
@@ -369,13 +355,6 @@ export function DocsChat() {
               </small>
             </div>
             <div className="chat-bubble chat-assistant">
-              {entry.status !== 'rejected' && (
-                <div className="chat-meta">
-                  <span className="chat-state">
-                    {statusLabel(entry.status)}
-                  </span>
-                </div>
-              )}
               {entry.status === 'thinking' && <p role="status">Thinking…</p>}
               {entry.result?.kind === 'query' && (
                 <>

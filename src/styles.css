@@ -243,16 +243,6 @@ h3 {
   justify-self: start;
   width: min(94%, 720px);
 }
-.chat-meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-.chat-state {
-  font-size: 0.8rem;
-  color: #52645b;
-}
 .chat-answer {
   white-space: pre-wrap;
   line-height: 1.6;
@@ -317,8 +307,6 @@ h3 {
   color: #5d6c65;
 }
 .action-preview {
-  border-top: 1px solid #e0e7e1;
-  padding-top: 14px;
   display: grid;
   gap: 12px;
   min-width: 0;

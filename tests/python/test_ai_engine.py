@@ -9,6 +9,7 @@ import pytest
 from google.cloud import firestore
 
 from ai_engine import ActionEngine, EngineFailure
+from ai_prompt import SYSTEM_PROMPT
 from ai_provider import ModelReply
 from docs_service import handle
 
@@ -65,6 +66,26 @@ def content(db, uid, entity_id):
 
 def history(db, uid, entity_id):
     return handle(db, uid, {"action": "history", "entityId": entity_id})["edits"]
+
+
+def test_relative_date_context_uses_client_timezone_and_rejects_invalid_zone(env, monkeypatch):
+    from datetime import datetime, timezone
+    import ai_engine
+
+    db, uid = env
+    monkeypatch.setattr(ai_engine, "_utcnow", lambda: datetime(2026, 10, 4, 3, 30, tzinfo=timezone.utc))
+    provider = Provider(action("create", entityType="friend", name="Kevin",
+                               content="Meet during the week of 2026-10-05 to 2026-10-11"))
+    engine = ActionEngine(db, uid, provider)
+    proposal = interpret(engine, "Meet Kevin next week", timeZone="America/New_York")
+    assert proposal["kind"] == "proposal"
+    sent = json.loads(provider.calls[0][0][1]["content"])
+    assert sent["timeZone"] == "America/New_York"
+    assert sent["referenceLocalDateTime"] == "2026-10-03T23:30:00-04:00"
+    assert "concrete dates" in SYSTEM_PROMPT
+    with pytest.raises(EngineFailure, match="valid IANA timezone"):
+        interpret(engine, "Meet Kevin next week", timeZone="Mars/Olympus")
+    assert len(provider.calls) == 1
 
 
 def test_examples_a_b_e_f_create_and_add(env):

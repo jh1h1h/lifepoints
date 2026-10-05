@@ -146,6 +146,8 @@ def _messages(case):
     records = case["records"]
     full = case.get("includeFullHistory", False)
     context = {"userMessage": case["message"], "includeFullHistory": full,
+               "referenceLocalDateTime": case.get("referenceLocalDateTime", datetime.now(timezone.utc).isoformat(timespec="seconds")),
+               "timeZone": case.get("timeZone", "UTC"),
                "context": {"mode": "full_history" if full else "current_only",
                            "retrievedCandidates": records}}
     return [{"role": "system", "content": SYSTEM_PROMPT},

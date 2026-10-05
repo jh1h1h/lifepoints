@@ -4,6 +4,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from google.api_core.exceptions import Aborted, AlreadyExists, Conflict
 from google.cloud import firestore
@@ -137,6 +138,13 @@ class ActionEngine:
         if type(request.get("includeFullHistory", False)) is not bool:
             raise EngineFailure("invalid-argument", "includeFullHistory must be Boolean")
         include_full_history = request.get("includeFullHistory", False)
+        time_zone = request.get("timeZone", "UTC")
+        if not isinstance(time_zone, str) or not time_zone or len(time_zone) > 100:
+            raise EngineFailure("invalid-argument", "timeZone must be a valid IANA timezone")
+        try:
+            local_zone = ZoneInfo(time_zone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise EngineFailure("invalid-argument", "timeZone must be a valid IANA timezone") from exc
         request_id = _id(request.get("requestId"), "requestId")
         conversation_id = request.get("conversationId")
         if conversation_id is not None:
@@ -146,14 +154,14 @@ class ActionEngine:
             _id(selected_id, "selectedEntityId")
             if conversation_id is None:
                 raise EngineFailure("invalid-argument", "A selected entity requires a clarification conversation")
-        fingerprint = hashlib.sha256(json.dumps({"message": message, "full": include_full_history,
+        fingerprint = hashlib.sha256(json.dumps({"message": message, "full": include_full_history, "timeZone": time_zone,
                                                  "conversationId": conversation_id, "selectedEntityId": selected_id}, sort_keys=True).encode()).hexdigest()
         request_ref, saved = self._start_request(request_id, fingerprint)
         if saved is not None:
             return saved
         diagnostics: dict[str, str] = {}
         try:
-            response, conversation = self._interpret_new(message, include_full_history, conversation_id, request_id, selected_id, diagnostics)
+            response, conversation = self._interpret_new(message, include_full_history, conversation_id, request_id, selected_id, diagnostics, local_zone, time_zone)
             return self._finish(request_ref, response, conversation)
         except (EngineFailure, ContextFailure, ProviderFailure) as exc:
             code = exc.code if isinstance(exc, (EngineFailure, ContextFailure)) else {
@@ -176,7 +184,7 @@ class ActionEngine:
         except Aborted as exc:
             raise EngineFailure("aborted", "A concurrent edit changed this request; try again") from exc
 
-    def _interpret_new(self, message: str, include_full_history: bool, conversation_id: str | None, request_id: str, selected_id: str | None, diagnostics: dict[str, str]):
+    def _interpret_new(self, message: str, include_full_history: bool, conversation_id: str | None, request_id: str, selected_id: str | None, diagnostics: dict[str, str], local_zone: ZoneInfo, time_zone: str):
         prior = self._conversation(conversation_id)
         if selected_id and (not prior or selected_id not in prior["candidateIds"]):
             raise EngineFailure("permission-denied", "Selected document was not a clarification choice")
@@ -187,6 +195,8 @@ class ActionEngine:
         conversation_text = (f"Original user message: {original}\nClarification: {message}"
                              + (f"\nSelected entity ID: {selected_id}" if selected_id else "")) if prior else message
         prompt_data = {"userMessage": conversation_text, "includeFullHistory": include_full_history,
+                       "referenceLocalDateTime": _utcnow().astimezone(local_zone).isoformat(timespec="seconds"),
+                       "timeZone": time_zone,
                        "context": json.loads(context.context_text)}
         reply = self.provider.complete([{"role": "system", "content": SYSTEM_PROMPT},
                                         {"role": "user", "content": json.dumps(prompt_data, ensure_ascii=False)}], request_id)
