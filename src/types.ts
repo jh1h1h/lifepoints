@@ -21,6 +21,7 @@ export interface Task {
   name: string
   description: string
   points: number
+  weeklyLimit: number | null
   icon: string
   note: string
   order: number
@@ -30,7 +31,13 @@ export interface Task {
 
 export type TaskDraft = Pick<
   Task,
-  'category' | 'name' | 'description' | 'points' | 'icon' | 'note'
+  | 'category'
+  | 'name'
+  | 'description'
+  | 'points'
+  | 'weeklyLimit'
+  | 'icon'
+  | 'note'
 >
 
 export interface Activity {

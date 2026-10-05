@@ -16,15 +16,24 @@ service cloud.firestore {
     }
     function validTask(data) {
       return data.keys().hasAll(['category', 'name', 'description', 'points', 'icon', 'note', 'order', 'createdAt', 'updatedAt'])
-        && data.keys().hasOnly(['category', 'name', 'description', 'points', 'icon', 'note', 'order', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['category', 'name', 'description', 'points', 'weeklyLimit', 'icon', 'note', 'order', 'createdAt', 'updatedAt'])
         && data.category in ['growth', 'people', 'life', 'play']
         && data.name is string && data.name.size() > 0 && data.name.size() <= 120
         && data.description is string && data.description.size() <= 1000
         && data.points is number && data.points > 0
+        && (!data.keys().hasAny(['weeklyLimit']) || data.weeklyLimit == null || (data.weeklyLimit is int && data.weeklyLimit >= 1 && data.weeklyLimit <= 999))
         && data.icon is string && data.icon.size() > 0
         && data.note is string && data.note.size() <= 2000
         && data.order is number && data.order >= 0
         && data.createdAt is string && data.updatedAt is string;
+    }
+    function validTaskUsage(data) {
+      return data.keys().hasAll(['taskId', 'weekKey', 'count', 'updatedAt'])
+        && data.keys().hasOnly(['taskId', 'weekKey', 'count', 'updatedAt'])
+        && data.taskId is string && data.taskId.size() > 0
+        && data.weekKey is string && data.weekKey.size() > 0
+        && data.count is int && data.count >= 0
+        && data.updatedAt is string;
     }
     match /users/{uid}/activities/{activityId} {
       allow read: if owner(uid);
@@ -37,8 +46,15 @@ service cloud.firestore {
       allow read: if owner(uid);
       allow create: if owner(uid) && validTask(request.resource.data);
       allow update: if owner(uid) && validTask(request.resource.data)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['category', 'name', 'description', 'points', 'icon', 'note', 'updatedAt']);
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['category', 'name', 'description', 'points', 'weeklyLimit', 'icon', 'note', 'updatedAt']);
       allow delete: if owner(uid);
+    }
+    match /users/{uid}/taskUsage/{usageId} {
+      allow read: if owner(uid);
+      allow create: if owner(uid) && validTaskUsage(request.resource.data);
+      allow update: if owner(uid) && validTaskUsage(request.resource.data)
+        && request.resource.data.taskId == resource.data.taskId
+        && request.resource.data.weekKey == resource.data.weekKey;
     }
     match /users/{uid}/settings/taskList {
       allow read: if owner(uid);

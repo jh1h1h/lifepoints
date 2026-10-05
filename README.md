@@ -19,7 +19,9 @@ Open the URL printed by Vite. Missing Firebase settings show a setup message ins
 
 ## Editing tasks
 
-Tasks are edited in **Settings → Your tasks**. Add, edit, or delete tasks there; names, categories, descriptions, icons, points, and task notes sync through Firestore. Points may be positive fractions. On the Dashboard, `+ note` saves a note on the task card without logging an activity or awarding points; use `(edit)` beside the displayed note to change it. Clicking the task name/icon logs an activity.
+Tasks are edited in **Settings → Your tasks**. Add, edit, or delete tasks there; names, categories, descriptions, icons, points, weekly limits, and task notes sync through Firestore. Points may be positive fractions. Leave **Weekly limit (times)** blank for no limit (the default), or set how many times that task may be logged in a local Monday–Sunday week. The task button shows its weekly usage and becomes unavailable at its limit; deleting a logged activity frees a use. The 25-point category cap still applies independently. On the Dashboard, `+ note` saves a note on the task card without logging an activity or awarding points; use `(edit)` beside the displayed note to change it. Clicking the task name/icon logs an activity.
+
+At the bottom of each category's quick-add list, **One-time task** lets you enter a name, positive point value, and optional note. Logging it creates an activity immediately, subject to the category's 25-point effective cap, but does not create a reusable task button. It remains in activity history and backups like any other logged activity.
 
 New accounts receive a one-time starter list from `src/data/taskSeeds.ts`. The account `cjh.t01snake@gmail.com` receives the preserved former `tasks.py` list on its first login; all other users receive the general template. After initialization, Firestore is the only live source for that user's tasks. The marker at `users/{uid}/settings/taskList` prevents reseeding, even if the user deletes every task. Changing the seed file later does not overwrite anyone's list. Task IDs stay stable when a task is edited, and historical activities retain their original snapshots.
 
@@ -35,7 +37,7 @@ Because GitHub Pages serves public JavaScript, both first-login seed lists are v
 
 The activity documents store `taskId`, `taskName`, `taskDescription`, `category`, `configuredPoints`, ISO `timestamp`, `note`, `createdAt`, and `updatedAt`. The document ID and authenticated path provide the activity ID and owner UID. Rules permit later edits only to `note` and `updatedAt`, keeping task snapshots fixed.
 
-Tasks live in `users/{uid}/tasks/{taskId}` with their editable fields and a persistent task note. Editing or deleting one does not rewrite activities already logged from it. Deploy the updated `firestore.rules` before releasing the task editor; older rules do not grant access to the new task collection.
+Tasks live in `users/{uid}/tasks/{taskId}` with their editable fields, optional weekly limit, and a persistent task note. Editing or deleting one does not rewrite activities already logged from it. Limited task logs use `users/{uid}/taskUsage/{taskId}_{weekKey}` as a transactional weekly counter, so simultaneous logs cannot both consume the final available use. Deploy the updated `firestore.rules` before releasing this feature; older rules do not grant access to the usage collection.
 
 ## GitHub Pages
 

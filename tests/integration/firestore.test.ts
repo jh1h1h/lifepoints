@@ -121,11 +121,33 @@ describe('Firestore ownership and data rules', () => {
       updateDoc(reference, { note: 'Reminder', updatedAt: now }),
     )
     await assertSucceeds(updateDoc(reference, { points: 3, updatedAt: now }))
+    await assertSucceeds(
+      updateDoc(reference, { weeklyLimit: 2, updatedAt: now }),
+    )
+    await assertFails(updateDoc(reference, { weeklyLimit: 0, updatedAt: now }))
     await assertFails(updateDoc(reference, { createdAt: 'different' }))
     await assertFails(getDoc(doc(bob, 'users/alice/tasks/growth_1')))
     await assertFails(setDoc(doc(bob, 'users/alice/tasks/another'), validTask))
     await assertFails(deleteDoc(doc(bob, 'users/alice/tasks/growth_1')))
     await assertSucceeds(deleteDoc(reference))
+  })
+  it('keeps weekly task usage private and validates its count', async () => {
+    const alice = environment.authenticatedContext('alice').firestore()
+    const bob = environment.authenticatedContext('bob').firestore()
+    const reference = doc(alice, 'users/alice/taskUsage/task_2026-W40')
+    const usage = {
+      taskId: 'task',
+      weekKey: '2026-W40',
+      count: 1,
+      updatedAt: now,
+    }
+    await assertSucceeds(setDoc(reference, usage))
+    await assertSucceeds(updateDoc(reference, { count: 0, updatedAt: now }))
+    await assertFails(updateDoc(reference, { count: -1, updatedAt: now }))
+    await assertFails(getDoc(doc(bob, 'users/alice/taskUsage/task_2026-W40')))
+    await assertFails(
+      setDoc(doc(bob, 'users/alice/taskUsage/other_2026-W40'), usage),
+    )
   })
   it('protects the task initialization marker', async () => {
     const alice = environment.authenticatedContext('alice').firestore()

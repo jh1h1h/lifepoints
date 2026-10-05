@@ -13,6 +13,7 @@ function toSeeds(rows: Row[]): TaskSeed[] {
     name,
     description,
     points,
+    weeklyLimit: null,
     icon,
   }))
 }

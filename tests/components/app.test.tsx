@@ -29,9 +29,15 @@ vi.mock('../../src/components/HistoryCharts', () => ({
   HistoryCharts: () => <div>Charts</div>,
 }))
 
-function TestDashboard({ initial = [] }: { initial?: Activity[] }) {
+function TestDashboard({
+  initial = [],
+  initialTasks = [growthTask],
+}: {
+  initial?: Activity[]
+  initialTasks?: Task[]
+}) {
   const [activities, setActivities] = useState(initial)
-  const [tasks, setTasks] = useState([growthTask])
+  const [tasks, setTasks] = useState(initialTasks)
   async function add(input: ActivityInput) {
     setActivities((current) => [
       {
@@ -165,6 +171,45 @@ describe('dashboard', () => {
     expect(progress).toHaveClass('capped')
     expect(screen.getByText('Cap reached · striped')).toBeVisible()
   })
+  it('stops a limited task at its weekly count and allows it again after deletion', async () => {
+    render(<TestDashboard initialTasks={[{ ...growthTask, weeklyLimit: 1 }]} />)
+    const taskButton = screen.getByRole('button', { name: taskButtonName })
+    expect(taskButton).toBeEnabled()
+    fireEvent.click(taskButton)
+    await waitFor(() => expect(taskButton).toBeDisabled())
+    expect(screen.getByText('Weekly limit reached')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(taskButton).toBeEnabled())
+  })
+  it('logs a one-time task without adding a saved quick-add task', async () => {
+    render(<TestDashboard initialTasks={[]} />)
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Add one-time task in Growth' }),
+    )
+    const dialog = screen.getByRole('dialog', {
+      name: 'One-time task in Growth',
+    })
+    fireEvent.change(within(dialog).getByLabelText('Task name'), {
+      target: { value: 'Special workshop' },
+    })
+    fireEvent.change(within(dialog).getByLabelText('Points'), {
+      target: { value: '7.5' },
+    })
+    fireEvent.change(within(dialog).getByLabelText('Note (optional)'), {
+      target: { value: 'First visit' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Log task' }))
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText('Weekly score 7.5 out of 100'),
+      ).toBeVisible(),
+    )
+    expect(screen.getByText('Special workshop')).toBeVisible()
+    expect(screen.getByText('First visit')).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: /Add Special workshop/ }),
+    ).not.toBeInTheDocument()
+  })
 })
 
 describe('history and settings', () => {
@@ -203,5 +248,36 @@ describe('history and settings', () => {
     ).toBeVisible()
     expect(screen.getByRole('button', { name: 'Export JSON' })).toBeVisible()
     expect(screen.getByRole('button', { name: 'Import JSON' })).toBeVisible()
+  })
+  it('edits a task weekly limit in Settings', async () => {
+    const updateTask = vi.fn(async () => true)
+    render(
+      <Settings
+        user={{ displayName: 'Test User', email: 'test@example.com' } as User}
+        activities={[]}
+        tasks={[growthTask]}
+        merge={async () => {}}
+        mergeTasks={async () => 0}
+        createTask={async () => true}
+        updateTask={updateTask}
+        removeTask={async () => true}
+        logOut={async () => {}}
+        busy={false}
+      />,
+    )
+    fireEvent.click(
+      screen.getByRole('button', { name: `Edit ${growthTask.name}` }),
+    )
+    expect(screen.getByLabelText('Weekly limit (times)')).toHaveValue(null)
+    fireEvent.change(screen.getByLabelText('Weekly limit (times)'), {
+      target: { value: '2' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save task' }))
+    await waitFor(() =>
+      expect(updateTask).toHaveBeenCalledWith(
+        growthTask.id,
+        expect.objectContaining({ weeklyLimit: 2 }),
+      ),
+    )
   })
 })

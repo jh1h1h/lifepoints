@@ -25,11 +25,18 @@ function validDraft(draft: TaskDraft): TaskDraft {
     !draft.icon.trim() ||
     draft.note.length > 2000 ||
     !Number.isFinite(draft.points) ||
-    draft.points <= 0
+    draft.points <= 0 ||
+    (draft.weeklyLimit != null &&
+      (!Number.isInteger(draft.weeklyLimit) ||
+        draft.weeklyLimit < 1 ||
+        draft.weeklyLimit > 999))
   )
-    throw new Error('Check the task name, points, description, and note.')
+    throw new Error(
+      'Check the task name, points, weekly limit, description, and note.',
+    )
   return {
     ...draft,
+    weeklyLimit: draft.weeklyLimit ?? null,
     name: draft.name.trim(),
     description: draft.description.trim(),
     note: draft.note.trim(),
@@ -51,6 +58,7 @@ export async function ensureTasksInitialized(
       const { id, ...fields } = task
       transaction.set(doc(firestore, 'users', uid, 'tasks', id), {
         ...fields,
+        weeklyLimit: null,
         note: '',
         order,
         createdAt: now,
@@ -70,7 +78,12 @@ export function subscribeTasks(
     taskCollection(uid),
     (snapshot) => {
       const tasks = snapshot.docs.map(
-        (item) => ({ ...item.data(), id: item.id }) as Task,
+        (item) =>
+          ({
+            ...item.data(),
+            id: item.id,
+            weeklyLimit: item.data().weeklyLimit ?? null,
+          }) as Task,
       )
       tasks.sort((a, b) => a.order - b.order || a.name.localeCompare(b.name))
       onData(tasks)

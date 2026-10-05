@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import type { Activity, ActivityInput } from '../types'
+import type { Activity, ActivityInput, Task } from '../types'
 import {
+  TaskLimitReachedError,
   addActivity,
   deleteActivity,
   editActivityNote,
@@ -46,17 +47,19 @@ export function useActivities(uid?: string) {
     setMessage('')
     try {
       return await operation()
-    } catch {
-      setMessage(failure)
+    } catch (error) {
+      setMessage(
+        error instanceof TaskLimitReachedError ? error.message : failure,
+      )
       return undefined
     } finally {
       setBusy(false)
     }
   }
-  async function add(input: ActivityInput) {
+  async function add(input: ActivityInput, task?: Task, observedUses = 0) {
     if (!uid) return false
     const id = await run(
-      () => addActivity(uid, input),
+      () => addActivity(uid, input, task, observedUses),
       'Could not save the activity. Check your connection and try again.',
     )
     if (id) {

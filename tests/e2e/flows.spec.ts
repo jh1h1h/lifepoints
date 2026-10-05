@@ -108,6 +108,60 @@ test('task note saves and edits without awarding points', async ({ page }) => {
   await secondPage.close()
 })
 
+test('weekly task limits sync and one-time tasks log without becoming saved tasks', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('button', { name: `Edit ${growthTask.name}` }).click()
+  const form = page.getByRole('form', { name: 'Edit task' })
+  await form.getByLabel('Weekly limit (times)').fill('1')
+  await form.getByRole('button', { name: 'Save task' }).click()
+  await page.getByRole('button', { name: 'Dashboard' }).click()
+  const quickAdd = page.getByRole('button', { name: taskButtonName })
+  await expect(quickAdd).toBeEnabled()
+  await quickAdd.click()
+  await expect(quickAdd).toBeDisabled()
+  await expect(page.getByText('Weekly limit reached')).toBeVisible()
+  await page.reload()
+  await expect(quickAdd).toBeDisabled()
+  const growth = page.getByRole('region', { name: 'Growth tasks' })
+  const oneTime = growth.getByRole('button', {
+    name: 'Add one-time task in Growth',
+  })
+  await expect(growth.getByRole('button').last()).toHaveAttribute(
+    'aria-label',
+    'Add one-time task in Growth',
+  )
+  await oneTime.click()
+  const dialog = page.getByRole('dialog', { name: 'One-time task in Growth' })
+  await dialog.getByLabel('Task name').fill('Special workshop')
+  await dialog.getByLabel('Points').fill('2.5')
+  await dialog.getByLabel('Note (optional)').fill('Only once')
+  await dialog.getByRole('button', { name: 'Log task' }).click()
+  await expect(
+    page.getByLabel(`Weekly score ${growthTask.points + 2.5} out of 100`),
+  ).toBeVisible()
+  await expect(
+    page.locator('.activity-row').filter({ hasText: 'Special workshop' }),
+  ).toContainText('Only once')
+  await expect(
+    page.getByRole('button', { name: /Add Special workshop/ }),
+  ).toHaveCount(0)
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await expect(
+    page.getByRole('button', { name: 'Edit Special workshop' }),
+  ).toHaveCount(0)
+  await page.getByRole('button', { name: 'Dashboard' }).click()
+  await page
+    .locator('.activity-row')
+    .filter({ hasText: growthTask.name })
+    .getByRole('button', { name: 'Delete' })
+    .click()
+  await expect(quickAdd).toBeEnabled()
+  await expect(page.getByLabel('Weekly score 2.5 out of 100')).toBeVisible()
+})
+
 test('creates and deletes a personal task without changing logged history', async ({
   page,
 }) => {
@@ -161,11 +215,15 @@ test('does not restore deleted tasks on refresh', async ({ page }) => {
     await helper.clearTestTasks()
   })
   await expect(
-    page.getByText('No tasks in this category. Add one in Settings.'),
+    page.getByText(
+      'No saved tasks. Add one in Settings, or use a one-time task below.',
+    ),
   ).toBeVisible()
   await page.reload()
   await expect(
-    page.getByText('No tasks in this category. Add one in Settings.'),
+    page.getByText(
+      'No saved tasks. Add one in Settings, or use a one-time task below.',
+    ),
   ).toBeVisible()
   await expect(page.getByRole('button', { name: taskButtonName })).toHaveCount(
     0,

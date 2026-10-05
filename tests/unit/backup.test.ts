@@ -74,6 +74,9 @@ describe('backup validation', () => {
     expect(parseBackup(JSON.stringify(backup)).tasks?.[0].note).toBe(
       'Remember this',
     )
+    expect(
+      parseBackup(JSON.stringify(backup)).tasks?.[0].weeklyLimit,
+    ).toBeNull()
     expect(() =>
       parseBackup(
         JSON.stringify({ ...backup, tasks: [{ ...task, points: 0 }] }),
@@ -84,6 +87,16 @@ describe('backup validation', () => {
         JSON.stringify({ ...backup, tasks: [{ ...task, category: 'wrong' }] }),
       ),
     ).toThrow('task category')
+    expect(() =>
+      parseBackup(
+        JSON.stringify({ ...backup, tasks: [{ ...task, weeklyLimit: 0 }] }),
+      ),
+    ).toThrow('weekly limit')
+    expect(
+      parseBackup(
+        JSON.stringify({ ...backup, tasks: [{ ...task, weeklyLimit: 3 }] }),
+      ).tasks?.[0].weeklyLimit,
+    ).toBe(3)
     expect(
       parseBackup(
         JSON.stringify({ version: 1, exportedAt: now, activities: [] }),

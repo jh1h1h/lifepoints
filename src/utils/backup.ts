@@ -106,6 +106,15 @@ export function parseBackup(text: string): Backup {
       )
         throw new Error('Invalid task points.')
       if (
+        item.weeklyLimit !== undefined &&
+        item.weeklyLimit !== null &&
+        (typeof item.weeklyLimit !== 'number' ||
+          !Number.isInteger(item.weeklyLimit) ||
+          item.weeklyLimit < 1 ||
+          item.weeklyLimit > 999)
+      )
+        throw new Error('Invalid task weekly limit.')
+      if (
         typeof item.order !== 'number' ||
         !Number.isFinite(item.order) ||
         item.order < 0

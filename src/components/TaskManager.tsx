@@ -25,6 +25,7 @@ const emptyDraft: TaskDraft = {
   name: '',
   description: '',
   points: 5,
+  weeklyLimit: null,
   icon: 'book-open',
   note: '',
 }
@@ -50,6 +51,7 @@ export function TaskManager({ tasks, create, update, remove, busy }: Props) {
             name: task.name,
             description: task.description,
             points: task.points,
+            weeklyLimit: task.weeklyLimit,
             icon: task.icon,
             note: task.note,
           }
@@ -141,6 +143,28 @@ export function TaskManager({ tasks, create, update, remove, busy }: Props) {
               />
             </label>
             <label>
+              Weekly limit (times)
+              <input
+                type="number"
+                aria-label="Weekly limit (times)"
+                min="1"
+                max="999"
+                step="1"
+                placeholder="No limit"
+                value={draft.weeklyLimit ?? ''}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    weeklyLimit:
+                      event.target.value === ''
+                        ? null
+                        : Number(event.target.value),
+                  })
+                }
+              />
+              <small>Leave blank for no limit.</small>
+            </label>
+            <label>
               Icon
               <select
                 value={draft.icon}
@@ -194,6 +218,9 @@ export function TaskManager({ tasks, create, update, remove, busy }: Props) {
               <span>
                 {CATEGORY_NAMES[task.category]} · +{task.points}
               </span>
+              {task.weeklyLimit != null && (
+                <span>Limit: {task.weeklyLimit} per week</span>
+              )}
               {task.description && <p>{task.description}</p>}
               {task.note && <p>Note: {task.note}</p>}
             </div>

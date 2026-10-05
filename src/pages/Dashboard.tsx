@@ -32,6 +32,7 @@ import {
   calculateWeeklyScore,
   getWeeklyCategoryBreakdown,
 } from '../utils/scoring'
+import { taskLimitReached, weeklyTaskUses } from '../utils/taskLimits'
 
 const icons = {
   'book-open': BookOpen,
@@ -55,7 +56,11 @@ const icons = {
 interface Props {
   activities: Activity[]
   tasks: Task[]
-  add: (input: ActivityInput) => Promise<boolean>
+  add: (
+    input: ActivityInput,
+    task?: Task,
+    observedUses?: number,
+  ) => Promise<boolean>
   remove: (id: string) => Promise<void>
   editNote: (id: string, note: string) => Promise<void>
   saveTaskNote: (id: string, note: string) => Promise<boolean>
@@ -76,6 +81,10 @@ export function Dashboard({
   const [filter, setFilter] = useState<Category | 'all'>('all')
   const [noteTask, setNoteTask] = useState<Task | null>(null)
   const [note, setNote] = useState('')
+  const [oneTimeCategory, setOneTimeCategory] = useState<Category | null>(null)
+  const [oneTimeName, setOneTimeName] = useState('')
+  const [oneTimePoints, setOneTimePoints] = useState('')
+  const [oneTimeNote, setOneTimeNote] = useState('')
   const current = useMemo(
     () =>
       activities.filter((activity) => belongsToWeek(activity.timestamp, now)),
@@ -85,19 +94,43 @@ export function Dashboard({
     () => getWeeklyCategoryBreakdown(activities, now),
     [activities, now],
   )
-  const visible = tasks.filter(
-    (task) => filter === 'all' || task.category === filter,
-  )
   async function log(task: Task) {
-    await add({
-      taskId: task.id,
-      taskName: task.name,
-      taskDescription: task.description,
-      category: task.category,
-      configuredPoints: task.points,
+    if (taskLimitReached(task, activities, now)) return
+    await add(
+      {
+        taskId: task.id,
+        taskName: task.name,
+        taskDescription: task.description,
+        category: task.category,
+        configuredPoints: task.points,
+        timestamp: new Date().toISOString(),
+        note: '',
+      },
+      task,
+      weeklyTaskUses(activities, task.id, now),
+    )
+  }
+  async function logOneTime() {
+    if (!oneTimeCategory) return
+    const name = oneTimeName.trim()
+    const points = Number(oneTimePoints)
+    if (!name || name.length > 120 || !Number.isFinite(points) || points <= 0)
+      return
+    const saved = await add({
+      taskId: `one_time_${crypto.randomUUID()}`,
+      taskName: name,
+      taskDescription: '',
+      category: oneTimeCategory,
+      configuredPoints: points,
       timestamp: new Date().toISOString(),
-      note: '',
+      note: oneTimeNote.trim(),
     })
+    if (saved) {
+      setOneTimeCategory(null)
+      setOneTimeName('')
+      setOneTimePoints('')
+      setOneTimeNote('')
+    }
   }
   async function saveNote() {
     if (!noteTask) return
@@ -166,48 +199,82 @@ export function Dashboard({
             </button>
           ))}
         </div>
-        <div className="task-grid">
-          {visible.map((task) => {
-            const Icon = icons[task.icon as keyof typeof icons] ?? Plus
-            return (
-              <div className="task-item" key={task.id}>
-                <button
-                  className="task-button"
-                  disabled={busy}
-                  onClick={() => log(task)}
-                  aria-label={`Add ${task.name}, ${task.points} points in ${CATEGORY_NAMES[task.category]}`}
-                >
-                  <Icon aria-hidden="true" size={20} />
-                  <span>
-                    <strong>{task.name}</strong>
-                    {task.note && (
-                      <span className="task-note-text">{task.note}</span>
-                    )}
-                    <small>
-                      {CATEGORY_NAMES[task.category]} · +{task.points}
-                    </small>
-                  </span>
-                </button>
-                <button
-                  className="note-action"
-                  disabled={busy}
-                  onClick={() => {
-                    setNoteTask(task)
-                    setNote(task.note)
-                  }}
-                  aria-label={`${task.note ? 'Edit' : 'Add'} note for ${task.name}`}
-                >
-                  {task.note ? '(edit)' : '+ note'}
-                </button>
-              </div>
-            )
-          })}
-        </div>
-        {visible.length === 0 && (
+        {tasks.length === 0 && (
           <p className="empty">
-            No tasks in this category. Add one in Settings.
+            No saved tasks. Add one in Settings, or use a one-time task below.
           </p>
         )}
+        {CATEGORIES.filter(
+          (category) => filter === 'all' || filter === category,
+        ).map((category) => (
+          <section
+            className="task-category"
+            key={category}
+            aria-label={`${CATEGORY_NAMES[category]} tasks`}
+          >
+            <h3>{CATEGORY_NAMES[category]}</h3>
+            <div className="task-grid">
+              {tasks
+                .filter((task) => task.category === category)
+                .map((task) => {
+                  const Icon = icons[task.icon as keyof typeof icons] ?? Plus
+                  const uses = weeklyTaskUses(activities, task.id, now)
+                  const reached = taskLimitReached(task, activities, now)
+                  return (
+                    <div className="task-item" key={task.id}>
+                      <button
+                        className="task-button"
+                        disabled={busy || reached}
+                        onClick={() => void log(task)}
+                        aria-label={`Add ${task.name}, ${task.points} points in ${CATEGORY_NAMES[task.category]}`}
+                      >
+                        <Icon aria-hidden="true" size={20} />
+                        <span>
+                          <strong>{task.name}</strong>
+                          {task.note && (
+                            <span className="task-note-text">{task.note}</span>
+                          )}
+                          <small>
+                            {CATEGORY_NAMES[task.category]} · +{task.points}
+                          </small>
+                          {task.weeklyLimit != null && (
+                            <small>
+                              {reached
+                                ? 'Weekly limit reached'
+                                : `${uses} / ${task.weeklyLimit} this week`}
+                            </small>
+                          )}
+                        </span>
+                      </button>
+                      <button
+                        className="note-action"
+                        disabled={busy}
+                        onClick={() => {
+                          setNoteTask(task)
+                          setNote(task.note)
+                        }}
+                        aria-label={`${task.note ? 'Edit' : 'Add'} note for ${task.name}`}
+                      >
+                        {task.note ? '(edit)' : '+ note'}
+                      </button>
+                    </div>
+                  )
+                })}
+              <button
+                className="one-time-button"
+                disabled={busy}
+                onClick={() => setOneTimeCategory(category)}
+                aria-label={`Add one-time task in ${CATEGORY_NAMES[category]}`}
+              >
+                <Plus aria-hidden="true" size={20} />
+                <span>
+                  <strong>One-time task</strong>
+                  <small>Name it and choose points</small>
+                </span>
+              </button>
+            </div>
+          </section>
+        ))}
       </section>
       <section className="card section-card">
         <div className="section-heading">
@@ -256,6 +323,60 @@ export function Dashboard({
               </button>
               <button className="primary" disabled={busy}>
                 Save note
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {oneTimeCategory && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setOneTimeCategory(null)}
+        >
+          <form
+            className="modal card"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`One-time task in ${CATEGORY_NAMES[oneTimeCategory]}`}
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault()
+              void logOneTime()
+            }}
+          >
+            <h2>One-time task · {CATEGORY_NAMES[oneTimeCategory]}</h2>
+            <label htmlFor="one-time-name">Task name</label>
+            <input
+              id="one-time-name"
+              required
+              maxLength={120}
+              value={oneTimeName}
+              onChange={(event) => setOneTimeName(event.target.value)}
+              autoFocus
+            />
+            <label htmlFor="one-time-points">Points</label>
+            <input
+              id="one-time-points"
+              type="number"
+              min="0.01"
+              step="any"
+              required
+              value={oneTimePoints}
+              onChange={(event) => setOneTimePoints(event.target.value)}
+            />
+            <label htmlFor="one-time-note">Note (optional)</label>
+            <textarea
+              id="one-time-note"
+              maxLength={2000}
+              value={oneTimeNote}
+              onChange={(event) => setOneTimeNote(event.target.value)}
+            />
+            <div className="modal-actions">
+              <button type="button" onClick={() => setOneTimeCategory(null)}>
+                Cancel
+              </button>
+              <button className="primary" disabled={busy}>
+                Log task
               </button>
             </div>
           </form>
