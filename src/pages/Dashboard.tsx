@@ -31,6 +31,7 @@ import { belongsToWeek, getWeekLabel } from '../utils/date'
 import {
   calculateWeeklyScore,
   getWeeklyCategoryBreakdown,
+  getWeeklyCategoryRawBreakdown,
 } from '../utils/scoring'
 import { taskLimitReached, weeklyTaskUses } from '../utils/taskLimits'
 
@@ -92,6 +93,10 @@ export function Dashboard({
   )
   const scores = useMemo(
     () => getWeeklyCategoryBreakdown(activities, now),
+    [activities, now],
+  )
+  const rawScores = useMemo(
+    () => getWeeklyCategoryRawBreakdown(activities, now),
     [activities, now],
   )
   async function log(task: Task) {
@@ -163,7 +168,7 @@ export function Dashboard({
           >
             <div className="score-heading">
               <h2>{CATEGORY_NAMES[category]}</h2>
-              <strong>{scores[category]} / 25</strong>
+              <strong>{rawScores[category]} / 25</strong>
             </div>
             <div
               className={`progress ${scores[category] === 25 ? 'capped' : ''}`}
@@ -175,7 +180,13 @@ export function Dashboard({
             >
               <span style={{ width: `${scores[category] * 4}%` }} />
             </div>
-            {scores[category] === 25 && <small>Cap reached · striped</small>}
+            {scores[category] === 25 && (
+              <small>
+                {rawScores[category] > 25
+                  ? '25 count toward weekly total · striped'
+                  : 'Cap reached · striped'}
+              </small>
+            )}
           </article>
         ))}
       </section>

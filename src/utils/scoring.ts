@@ -24,11 +24,32 @@ export function calculateCategoryScore(
   activities: Activity[],
   category: Category,
 ): number {
-  return getEffectivePoints(
-    activities
-      .filter((activity) => activity.category === category)
-      .reduce((sum, activity) => sum + activity.configuredPoints, 0),
+  return getEffectivePoints(calculateCategoryRawScore(activities, category))
+}
+
+export function calculateCategoryRawScore(
+  activities: Activity[],
+  category: Category,
+): number {
+  const total = activities
+    .filter((activity) => activity.category === category)
+    .reduce((sum, activity) => sum + activity.configuredPoints, 0)
+  return Number(total.toPrecision(12))
+}
+
+export function getWeeklyCategoryRawBreakdown(
+  activities: Activity[],
+  week: Date,
+): Record<Category, number> {
+  const weekly = activities.filter((activity) =>
+    belongsToWeek(activity.timestamp, week),
   )
+  return Object.fromEntries(
+    CATEGORIES.map((category) => [
+      category,
+      calculateCategoryRawScore(weekly, category),
+    ]),
+  ) as Record<Category, number>
 }
 
 export function getWeeklyCategoryBreakdown(

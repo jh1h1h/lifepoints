@@ -241,7 +241,12 @@ test('caps raw activities and marks both progress bar and chart', async ({
   await expect(
     page.getByRole('progressbar', { name: 'Growth score' }),
   ).toHaveAttribute('aria-valuenow', '25')
-  await expect(page.getByText('Cap reached · striped')).toBeVisible()
+  await expect(
+    page.getByText(`${count * growthTask.points} / 25`),
+  ).toBeVisible()
+  await expect(
+    page.getByText('25 count toward weekly total · striped'),
+  ).toBeVisible()
   expect(
     await page
       .getByRole('progressbar', { name: 'Growth score' })
@@ -270,6 +275,7 @@ test('caps raw activities and marks both progress bar and chart', async ({
     stackedPeople: false,
     categoryGrowth: true,
     categoryPeople: false,
+    stackedNoOutlines: true,
   })
   await page.getByRole('button', { name: 'Dismiss message' }).click()
   await page.screenshot({

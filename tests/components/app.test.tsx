@@ -171,6 +171,17 @@ describe('dashboard', () => {
     expect(progress).toHaveClass('capped')
     expect(screen.getByText('Cap reached · striped')).toBeVisible()
   })
+  it('shows points above 25 while only 25 count toward the weekly total', () => {
+    render(<TestDashboard initial={Array.from({ length: 6 }, () => entry())} />)
+    const progress = screen.getByRole('progressbar', { name: 'Growth score' })
+    expect(screen.getByText('30 / 25')).toBeVisible()
+    expect(screen.getByLabelText('Weekly score 25 out of 100')).toBeVisible()
+    expect(progress).toHaveAttribute('aria-valuenow', '25')
+    expect(progress).toHaveClass('capped')
+    expect(
+      screen.getByText('25 count toward weekly total · striped'),
+    ).toBeVisible()
+  })
   it('stops a limited task at its weekly count and allows it again after deletion', async () => {
     render(<TestDashboard initialTasks={[{ ...growthTask, weeklyLimit: 1 }]} />)
     const taskButton = screen.getByRole('button', { name: taskButtonName })

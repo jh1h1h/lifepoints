@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { Activity, Category } from '../../src/types'
 import {
+  calculateCategoryRawScore,
   calculateCategoryScore,
   calculateWeeklyScore,
   getWeeklyCategoryBreakdown,
+  getWeeklyCategoryRawBreakdown,
   groupActivitiesByCategory,
 } from '../../src/utils/scoring'
 
@@ -39,6 +41,9 @@ describe('weekly scoring', () => {
     const six = [...five, activity()]
     expect(calculateCategoryScore(five, 'growth')).toBe(25)
     expect(calculateCategoryScore(six, 'growth')).toBe(25)
+    expect(calculateCategoryRawScore(six, 'growth')).toBe(30)
+    expect(getWeeklyCategoryRawBreakdown(six, week).growth).toBe(30)
+    expect(calculateWeeklyScore(six, week)).toBe(25)
     expect(six).toHaveLength(6)
     expect(six.every((item) => item.configuredPoints === 5)).toBe(true)
   })
@@ -55,6 +60,7 @@ describe('weekly scoring', () => {
   it('adds fractional values accurately and recognizes a decimal cap', () => {
     const small = Array.from({ length: 10 }, () => activity('growth', 0.3))
     expect(calculateCategoryScore(small, 'growth')).toBe(3)
+    expect(calculateCategoryRawScore(small, 'growth')).toBe(3)
     const capped = Array.from({ length: 100 }, () => activity('growth', 0.25))
     expect(calculateCategoryScore(capped, 'growth')).toBe(25)
   })

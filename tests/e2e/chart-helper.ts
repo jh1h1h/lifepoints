@@ -15,6 +15,7 @@ export function inspectChartPatterns(): {
   stackedPeople: boolean
   categoryGrowth: boolean
   categoryPeople: boolean
+  stackedNoOutlines: boolean
 } {
   const canvas = document.querySelector<HTMLCanvasElement>(
     'canvas[aria-label="Stacked weekly scores from zero to 100"]',
@@ -27,10 +28,17 @@ export function inspectChartPatterns(): {
     'canvas[aria-label="People weekly scores from zero to 25"]',
   )
   if (!growth || !people) throw new Error('Category chart is missing')
+  const stackedChart = Chart.getChart(canvas)
+  if (!stackedChart) throw new Error('Overall chart was not initialized')
+  const last = stackedChart.data.labels!.length - 1
   return {
     stackedGrowth: isPattern(canvas, 0),
     stackedPeople: isPattern(canvas, 1),
     categoryGrowth: isPattern(growth, 0),
     categoryPeople: isPattern(people, 0),
+    stackedNoOutlines: stackedChart.data.datasets.every(
+      (_, index) =>
+        stackedChart.getDatasetMeta(index).data[last].options.borderWidth === 0,
+    ),
   }
 }
