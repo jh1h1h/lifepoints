@@ -17,6 +17,7 @@ import {
 import {
   CATEGORY_AXIS_MAX,
   chartFill,
+  getCategoryAxisMax,
   OVERALL_AXIS_MAX,
   type WeekChartRow,
 } from '../utils/history'
@@ -25,6 +26,13 @@ import { chartOptions } from '../utils/chartOptions'
 ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
 
 export function HistoryCharts({ rows }: { rows: WeekChartRow[] }) {
+  const rawValues = useMemo(
+    () =>
+      CATEGORIES.map((category) =>
+        rows.map((row) => row.categories[category].rawValue),
+      ),
+    [rows],
+  )
   const stacked = useMemo(
     () => ({
       labels: rows.map((row) => row.label.split(' – ')[0]),
@@ -63,7 +71,7 @@ export function HistoryCharts({ rows }: { rows: WeekChartRow[] }) {
         <div className="chart-wrap">
           <Bar
             data={stacked}
-            options={chartOptions(OVERALL_AXIS_MAX, true)}
+            options={chartOptions(OVERALL_AXIS_MAX, true, rawValues)}
             aria-label="Stacked weekly scores from zero to 100"
             role="img"
           />
@@ -76,7 +84,7 @@ export function HistoryCharts({ rows }: { rows: WeekChartRow[] }) {
                 {row.label}: {row.total} / 100 ·{' '}
                 {CATEGORIES.map(
                   (category) =>
-                    `${CATEGORY_NAMES[category]} ${row.categories[category].value}${row.categories[category].isCapped ? ' capped' : ''}`,
+                    `${CATEGORY_NAMES[category]} ${row.categories[category].value}${row.categories[category].isCapped ? ' capped' : ''}${row.categories[category].rawValue > CATEGORY_AXIS_MAX ? ` (${row.categories[category].rawValue} logged)` : ''}`,
                 ).join(', ')}
               </li>
             ))}
@@ -105,7 +113,7 @@ function CategoryChart({
     datasets: [
       {
         label: CATEGORY_NAMES[category],
-        data: rows.map((row) => row.categories[category].value),
+        data: rows.map((row) => row.categories[category].rawValue),
         backgroundColor: (context: { chart: ChartJS; dataIndex: number }) =>
           chartFill(
             context.chart.ctx,
@@ -128,8 +136,8 @@ function CategoryChart({
       <div className="chart-wrap small">
         <Bar
           data={data}
-          options={chartOptions(CATEGORY_AXIS_MAX, false)}
-          aria-label={`${CATEGORY_NAMES[category]} weekly scores from zero to 25`}
+          options={chartOptions(getCategoryAxisMax(rows, category), false)}
+          aria-label={`${CATEGORY_NAMES[category]} weekly raw points`}
           role="img"
         />
       </div>
@@ -138,7 +146,7 @@ function CategoryChart({
         {rows.filter((row) => row.categories[category].isCapped).length === 1
           ? 'week'
           : 'weeks'}{' '}
-        · Striped = 25 / 25
+        · Striped = 25 or more logged
       </p>
     </section>
   )

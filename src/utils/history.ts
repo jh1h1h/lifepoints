@@ -6,7 +6,10 @@ import {
   type Category,
 } from '../types'
 import { getWeekKey, getWeekLabel, weeksThroughNow } from './date'
-import { getWeeklyCategoryBreakdown } from './scoring'
+import {
+  getWeeklyCategoryBreakdown,
+  getWeeklyCategoryRawBreakdown,
+} from './scoring'
 
 export interface WeekChartRow {
   key: string
@@ -15,7 +18,12 @@ export interface WeekChartRow {
   total: number
   categories: Record<
     Category,
-    { value: number; isCapped: boolean; appearance: 'striped' | 'solid' }
+    {
+      value: number
+      rawValue: number
+      isCapped: boolean
+      appearance: 'striped' | 'solid'
+    }
   >
 }
 
@@ -34,13 +42,20 @@ export function buildHistoryRows(
 ): WeekChartRow[] {
   return weeksThroughNow(activities, range, now).map((week) => {
     const scores = getWeeklyCategoryBreakdown(activities, week)
+    const rawScores = getWeeklyCategoryRawBreakdown(activities, week)
     const categories = Object.fromEntries(
       CATEGORIES.map((category) => {
         const value = scores[category]
+        const rawValue = rawScores[category]
         const isCapped = value === CATEGORY_CAP
         return [
           category,
-          { value, isCapped, appearance: isCapped ? 'striped' : 'solid' },
+          {
+            value,
+            rawValue,
+            isCapped,
+            appearance: isCapped ? 'striped' : 'solid',
+          },
         ]
       }),
     ) as WeekChartRow['categories']
@@ -52,6 +67,17 @@ export function buildHistoryRows(
       categories,
     }
   })
+}
+
+export function getCategoryAxisMax(
+  rows: WeekChartRow[],
+  category: Category,
+): number {
+  const highest = Math.max(
+    CATEGORY_CAP,
+    ...rows.map((row) => row.categories[category].rawValue),
+  )
+  return Math.ceil(highest / 5) * 5
 }
 
 export function stripePattern(

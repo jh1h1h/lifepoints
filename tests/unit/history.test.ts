@@ -5,8 +5,9 @@ import {
   OVERALL_AXIS_MAX,
   buildHistoryRows,
   chartFill,
+  getCategoryAxisMax,
 } from '../../src/utils/history'
-import { chartOptions } from '../../src/utils/chartOptions'
+import { chartOptions, formatScoreTooltip } from '../../src/utils/chartOptions'
 
 const now = new Date(2026, 8, 30)
 let nextId = 0
@@ -36,6 +37,7 @@ describe('history chart data', () => {
       'play',
     ])
     expect(row.categories.people.value).toBe(0)
+    expect(row.categories.people.rawValue).toBe(0)
   })
   it('caps category and total values and marks only capped bars as striped', () => {
     const entries: Activity[] = ['growth', 'people', 'life', 'play'].flatMap(
@@ -47,23 +49,35 @@ describe('history chart data', () => {
     const row = buildHistoryRows(entries, 4, now).at(-1)!
     expect(row.categories.growth).toEqual({
       value: 25,
+      rawValue: 30,
       isCapped: true,
       appearance: 'striped',
     })
     expect(row.total).toBe(100)
+    expect(getCategoryAxisMax([row], 'growth')).toBe(30)
     const uncapped = buildHistoryRows([activity('growth', 12)], 4, now).at(-1)!
     expect(uncapped.categories.growth).toEqual({
       value: 12,
+      rawValue: 12,
       isCapped: false,
       appearance: 'solid',
     })
     expect(uncapped.total).toBe(12)
+    expect(getCategoryAxisMax([uncapped], 'growth')).toBe(25)
+    const exactCap = buildHistoryRows([activity('growth', 25)], 4, now).at(-1)!
+    expect(exactCap.categories.growth.isCapped).toBe(true)
+    expect(exactCap.categories.growth.rawValue).toBe(25)
   })
-  it('uses fixed chart limits and pattern only at 25', () => {
+  it('keeps the stacked limit fixed and expands category axes for raw values', () => {
     expect(OVERALL_AXIS_MAX).toBe(100)
     expect(CATEGORY_AXIS_MAX).toBe(25)
     expect(chartOptions(OVERALL_AXIS_MAX, true).scales?.y?.max).toBe(100)
     expect(chartOptions(CATEGORY_AXIS_MAX, false).scales?.y?.max).toBe(25)
+    expect(chartOptions(30, false).scales?.y?.max).toBe(30)
+    expect(formatScoreTooltip('Growth', 30)).toBe(
+      'Growth: 30 / 25 (25 counted)',
+    )
+    expect(formatScoreTooltip('Growth', 20)).toBe('Growth: 20 / 25')
     const pattern = {} as CanvasPattern
     const context = {
       createPattern: vi.fn(() => pattern),

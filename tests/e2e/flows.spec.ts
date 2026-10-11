@@ -261,7 +261,7 @@ test('caps raw activities and marks both progress bar and chart', async ({
     page.locator('.chart-summary li').filter({ hasText: 'Growth 25 capped' }),
   ).toBeVisible()
   await expect(
-    page.getByText('1 capped week · Striped = 25 / 25'),
+    page.getByText('1 capped week · Striped = 25 or more logged'),
   ).toBeVisible()
   await expect(
     page.getByRole('img', { name: 'Stacked weekly scores from zero to 100' }),
@@ -276,7 +276,23 @@ test('caps raw activities and marks both progress bar and chart', async ({
     categoryGrowth: true,
     categoryPeople: false,
     stackedNoOutlines: true,
+    stackedGrowthValue: 25,
+    categoryGrowthValue: count * growthTask.points,
+    categoryGrowthAxisMax: Math.ceil((count * growthTask.points) / 5) * 5,
   })
+  const barCenter = await page.evaluate(async () => {
+    const path = '/tests/e2e/chart-helper.ts'
+    return (await import(/* @vite-ignore */ path)).stackedGrowthBarCenter()
+  })
+  await page.mouse.move(barCenter.x, barCenter.y)
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = '/tests/e2e/chart-helper.ts'
+        return (await import(/* @vite-ignore */ path)).stackedTooltipText()
+      }),
+    )
+    .toContain(`Growth: ${count * growthTask.points} / 25 (25 counted)`)
   await page.getByRole('button', { name: 'Dismiss message' }).click()
   await page.screenshot({
     path: 'test-results/history-cap-1280.png',

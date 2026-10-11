@@ -1,8 +1,13 @@
 import type { ChartOptions } from 'chart.js'
 
+export function formatScoreTooltip(label: string, rawPoints: number): string {
+  return `${label}: ${rawPoints} / 25${rawPoints > 25 ? ' (25 counted)' : ''}`
+}
+
 export function chartOptions(
   max: number,
   stacked: boolean,
+  rawValues?: number[][],
 ): ChartOptions<'bar'> {
   return {
     responsive: true,
@@ -24,7 +29,7 @@ export function chartOptions(
         border: { display: false, dash: [4, 4] },
         grid: { color: '#e6ece6', tickLength: 0 },
         ticks: {
-          stepSize: max === 100 ? 25 : 5,
+          stepSize: stacked ? 25 : max > 50 ? 10 : 5,
           color: '#607168',
           padding: 8,
         },
@@ -49,7 +54,13 @@ export function chartOptions(
         padding: 11,
         callbacks: {
           title: (items) => `Week of ${items[0]?.label ?? ''}`,
-          label: (item) => `${item.dataset.label}: ${item.parsed.y ?? 0} / 25`,
+          label: (item) =>
+            formatScoreTooltip(
+              item.dataset.label ?? '',
+              rawValues?.[item.datasetIndex]?.[item.dataIndex] ??
+                item.parsed.y ??
+                0,
+            ),
         },
       },
     },

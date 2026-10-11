@@ -38,8 +38,8 @@ export function History({
         <p className="eyebrow">Progress over time</p>
         <h1>History</h1>
         <p className="muted">
-          Weekly scores reflect each category's 25-point cap. Activities retain
-          their original points.
+          The stacked total counts up to 25 per category. Category charts show
+          every point logged.
         </p>
       </div>
       <div className="filters range-controls" aria-label="History range">
