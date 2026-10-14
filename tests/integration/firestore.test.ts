@@ -157,26 +157,26 @@ describe('Firestore ownership and data rules', () => {
     await assertFails(setDoc(marker, { seedVersion: 1, createdAt: now }))
     await assertFails(getDoc(doc(bob, 'users/alice/settings/taskList')))
   })
-  it('allows only owner reads of Docs and forbids direct writes that bypass history', async () => {
+  it('allows only owner reads of Docs sections and forbids direct writes', async () => {
     const alice = environment.authenticatedContext('alice').firestore()
     const bob = environment.authenticatedContext('bob').firestore()
     const guest = environment.unauthenticatedContext().firestore()
     const entityPath = 'users/alice/docs/doc123456'
-    const editPath = `${entityPath}/edits/edit123456`
+    const sectionPath = `${entityPath}/sections/section123`
     await environment.withSecurityRulesDisabled(async (context) => {
       const admin = context.firestore()
-      await setDoc(doc(admin, entityPath), { name: 'Kevin', content: 'Hi' })
-      await setDoc(doc(admin, editPath), { patch: '{}' })
+      await setDoc(doc(admin, entityPath), { name: 'Kevin' })
+      await setDoc(doc(admin, sectionPath), { content: 'Hi' })
     })
     await assertSucceeds(getDoc(doc(alice, entityPath)))
-    await assertSucceeds(getDoc(doc(alice, editPath)))
+    await assertSucceeds(getDoc(doc(alice, sectionPath)))
     await assertFails(getDoc(doc(bob, entityPath)))
-    await assertFails(getDoc(doc(bob, editPath)))
+    await assertFails(getDoc(doc(bob, sectionPath)))
     await assertFails(getDoc(doc(guest, entityPath)))
     await assertFails(setDoc(doc(alice, entityPath), { name: 'Bypass' }))
-    await assertFails(updateDoc(doc(alice, entityPath), { content: 'Bypass' }))
+    await assertFails(updateDoc(doc(alice, sectionPath), { content: 'Bypass' }))
     await assertFails(deleteDoc(doc(alice, entityPath)))
-    await assertFails(setDoc(doc(alice, editPath), { patch: '{}' }))
+    await assertFails(setDoc(doc(alice, sectionPath), { content: 'Bypass' }))
     await assertFails(
       setDoc(doc(alice, 'users/alice/docOperations/op123456'), {}),
     )

@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { DocsChat } from '../components/DocsChat'
 import {
   docsService,
   readableDocError,
-  type ChangeType,
-  type DocEdit,
   type DocEntity,
+  type DocSection,
   type EntityType,
 } from '../services/docsService'
-import { DocsChat } from '../components/DocsChat'
 import { docPath } from '../utils/docs'
 import { href, navigate } from '../utils/routes'
 
@@ -25,81 +24,180 @@ function Link({ to, children }: { to: string; children: React.ReactNode }) {
   )
 }
 
-function parseChanges(patch: string): { remove: string[]; add: string[] }[] {
-  const value: unknown = JSON.parse(patch)
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !('changes' in value) ||
-    !Array.isArray(value.changes)
+function DocsNav({
+  active,
+  unread,
+}: {
+  active: 'chat' | 'friends' | 'projects'
+  unread: number
+}) {
+  const tab = (to: string, key: typeof active, label: React.ReactNode) => (
+    <a
+      href={href(to)}
+      aria-current={active === key ? 'page' : undefined}
+      onClick={(event) => {
+        event.preventDefault()
+        navigate(to)
+      }}
+    >
+      {label}
+    </a>
   )
-    return []
-  return value.changes as { remove: string[]; add: string[] }[]
-}
-
-function EditHistory({ edits }: { edits: DocEdit[] }) {
   return (
-    <section className="card docs-panel" aria-label="Edit history">
-      <h2>Edit history</h2>
-      {edits.length === 0 ? (
-        <p className="muted">No edits yet.</p>
-      ) : (
-        <ol className="edit-history">
-          {[...edits]
-            .sort((a, b) => a.newRevision - b.newRevision)
-            .map((edit) => (
-              <li key={edit.eventId}>
-                <strong>
-                  Revision {edit.newRevision} ·{' '}
-                  {edit.operation.replace('_', ' ')}
-                </strong>
-                <p className="muted">
-                  {new Date(edit.timestamp).toLocaleString()} ·{' '}
-                  {edit.source === 'manual' ? 'Manual' : 'AI-approved'} ·{' '}
-                  {edit.changeType.replace('_', ' ')}
-                </p>
-                {edit.description && <p>{edit.description}</p>}
-                {edit.beforeName !== edit.afterName && (
-                  <p>
-                    Name: {edit.beforeName || '(new)'} → {edit.afterName}
-                  </p>
-                )}
-                {JSON.stringify(edit.beforeAliases) !==
-                  JSON.stringify(edit.afterAliases) && (
-                  <p>Aliases: {edit.afterAliases.join(', ') || 'none'}</p>
-                )}
-                <div
-                  className="delta"
-                  aria-label={`Changes in revision ${edit.newRevision}`}
-                >
-                  {parseChanges(edit.patch).flatMap((change, index) => [
-                    ...change.remove.map((line, lineIndex) => (
-                      <div
-                        className="delta-removed"
-                        key={`${index}-r-${lineIndex}`}
-                      >
-                        − {line.replace(/[\r\n]+$/, '')}
-                      </div>
-                    )),
-                    ...change.add.map((line, lineIndex) => (
-                      <div
-                        className="delta-added"
-                        key={`${index}-a-${lineIndex}`}
-                      >
-                        + {line.replace(/[\r\n]+$/, '')}
-                      </div>
-                    )),
-                  ])}
-                </div>
-              </li>
-            ))}
-        </ol>
+    <nav className="docs-tabs" aria-label="Docs navigation">
+      {tab('/docs', 'chat', 'Chat')}
+      {tab(
+        '/docs/friends',
+        'friends',
+        <>
+          Friends{' '}
+          {unread > 0 && (
+            <span
+              className="notification-badge"
+              aria-label={`${unread} unread friend sections`}
+            >
+              {unread}
+            </span>
+          )}
+        </>,
       )}
-    </section>
+      {tab('/docs/projects', 'projects', 'Projects')}
+    </nav>
   )
 }
 
-function DocList({ type }: { type: EntityType }) {
+function SectionCard({
+  section,
+  friend,
+  onChanged,
+}: {
+  section: DocSection
+  friend: boolean
+  onChanged: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(section.content)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  async function mutate(
+    action: 'update_section' | 'set_section_pinned' | 'set_section_unread',
+    values: Record<string, unknown>,
+  ) {
+    setBusy(true)
+    setError('')
+    try {
+      await docsService.mutate(action, {
+        entityId: section.entityId,
+        sectionId: section.id,
+        expectedRevision: section.revision,
+        ...values,
+      })
+      setEditing(false)
+      onChanged()
+    } catch (cause) {
+      setError(readableDocError(cause))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <article
+      className={`section-card${section.pinned ? ' is-pinned' : ''}${section.unread ? ' is-unread' : ''}`}
+    >
+      <header>
+        <div>
+          <strong>{section.entityName}</strong>
+          <small>
+            {new Date(section.createdAt).toLocaleString()}
+            {section.updatedAt !== section.createdAt ? ' · edited' : ''}
+          </small>
+        </div>
+        {section.pinned && <span title="Pinned">📌</span>}
+      </header>
+      {editing ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            void mutate('update_section', { content: draft })
+          }}
+        >
+          <textarea
+            required
+            rows={6}
+            maxLength={10000}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <div className="docs-actions">
+            <button
+              className="primary"
+              disabled={busy || draft === section.content}
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setDraft(section.content)
+                setEditing(false)
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="section-content">{section.content}</div>
+      )}
+      {!editing && (
+        <div className="section-controls">
+          <button disabled={busy} onClick={() => setEditing(true)}>
+            Edit
+          </button>
+          <button
+            disabled={busy}
+            onClick={() =>
+              void mutate('set_section_pinned', { pinned: !section.pinned })
+            }
+          >
+            {section.pinned ? 'Unpin' : 'Pin'}
+          </button>
+          {friend && (
+            <label className="compact-check">
+              <input
+                type="checkbox"
+                checked={section.unread}
+                disabled={busy}
+                onChange={(event) =>
+                  void mutate('set_section_unread', {
+                    unread: event.target.checked,
+                  })
+                }
+              />
+              Unread
+            </label>
+          )}
+        </div>
+      )}
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+    </article>
+  )
+}
+
+function DocList({
+  type,
+  unread,
+  refreshSummary,
+}: {
+  type: EntityType
+  unread: number
+  refreshSummary: () => void
+}) {
   const [items, setItems] = useState<DocEntity[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -109,7 +207,7 @@ function DocList({ type }: { type: EntityType }) {
   const [aliases, setAliases] = useState('')
   const [content, setContent] = useState('')
   const [busy, setBusy] = useState(false)
-  const operationId = useRef<string | null>(null)
+  const operationId = useRef<string | undefined>(undefined)
   useEffect(() => {
     let active = true
     setLoading(true)
@@ -121,7 +219,7 @@ function DocList({ type }: { type: EntityType }) {
           setError('')
         }
       })
-      .catch((cause: unknown) => {
+      .catch((cause) => {
         if (active) setError(readableDocError(cause))
       })
       .finally(() => {
@@ -133,7 +231,7 @@ function DocList({ type }: { type: EntityType }) {
   }, [type])
   const filtered = items.filter((item) =>
     [item.name, ...item.aliases].some((value) =>
-      value.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
+      value.toLowerCase().includes(search.toLowerCase()),
     ),
   )
   async function create(event: React.FormEvent) {
@@ -155,7 +253,8 @@ function DocList({ type }: { type: EntityType }) {
         },
         operationId.current,
       )
-      operationId.current = null
+      operationId.current = undefined
+      refreshSummary()
       navigate(docPath(type, result.id))
     } catch (cause) {
       setError(readableDocError(cause))
@@ -170,13 +269,18 @@ function DocList({ type }: { type: EntityType }) {
         <div>
           <p className="eyebrow">Docs</p>
           <h1>{title}</h1>
-          <p className="muted">One simple document for each {type}.</p>
+          <p className="muted">
+            Each {type} is a timeline of editable sections.
+          </p>
         </div>
         <button className="primary" onClick={() => setCreating(true)}>
           New {type}
         </button>
       </div>
-      <DocsNav active={type === 'friend' ? 'friends' : 'projects'} />
+      <DocsNav
+        active={type === 'friend' ? 'friends' : 'projects'}
+        unread={unread}
+      />
       {error && (
         <p className="error" role="alert">
           {error}
@@ -195,31 +299,23 @@ function DocList({ type }: { type: EntityType }) {
               required
               maxLength={120}
               value={name}
-              onChange={(event) => {
-                setName(event.target.value)
-                operationId.current = null
-              }}
+              onChange={(event) => setName(event.target.value)}
             />
           </label>
           <label>
             Aliases (comma-separated, optional)
             <input
               value={aliases}
-              onChange={(event) => {
-                setAliases(event.target.value)
-                operationId.current = null
-              }}
+              onChange={(event) => setAliases(event.target.value)}
             />
           </label>
           <label>
-            Document
+            First section (optional)
             <textarea
-              rows={8}
+              rows={5}
+              maxLength={10000}
               value={content}
-              onChange={(event) => {
-                setContent(event.target.value)
-                operationId.current = null
-              }}
+              onChange={(event) => setContent(event.target.value)}
             />
           </label>
           <div className="docs-actions">
@@ -246,8 +342,8 @@ function DocList({ type }: { type: EntityType }) {
           />
         </label>
         {loading ? (
-          <p className="muted">Loading documents…</p>
-        ) : filtered.length === 0 ? (
+          <p className="muted">Loading…</p>
+        ) : !filtered.length ? (
           <p className="muted">
             {search ? 'No matches.' : `No ${title.toLowerCase()} yet.`}
           </p>
@@ -256,9 +352,16 @@ function DocList({ type }: { type: EntityType }) {
             {filtered.map((item) => (
               <li key={item.id}>
                 <Link to={docPath(type, item.id)}>{item.name}</Link>
-                {item.aliases.length > 0 && (
-                  <small>Also: {item.aliases.join(', ')}</small>
+                {item.unreadCount > 0 && (
+                  <span className="notification-badge">{item.unreadCount}</span>
                 )}
+                <small>
+                  {item.sectionCount}{' '}
+                  {item.sectionCount === 1 ? 'section' : 'sections'}
+                  {item.aliases.length
+                    ? ` · Also: ${item.aliases.join(', ')}`
+                    : ''}
+                </small>
               </li>
             ))}
           </ul>
@@ -268,111 +371,99 @@ function DocList({ type }: { type: EntityType }) {
   )
 }
 
-type EditMode = 'content' | 'name' | 'aliases' | null
-
-function DocDetail({ type, id }: { type: EntityType; id: string }) {
-  const [entity, setEntity] = useState<DocEntity | null>(null)
-  const [edits, setEdits] = useState<DocEdit[] | null>(null)
-  const [loading, setLoading] = useState(true)
+function DocDetail({
+  type,
+  id,
+  unread,
+  refreshSummary,
+}: {
+  type: EntityType
+  id: string
+  unread: number
+  refreshSummary: () => void
+}) {
+  const [entity, setEntity] = useState<DocEntity>()
+  const [sections, setSections] = useState<DocSection[]>([])
+  const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
+  const [prioritizePins, setPrioritizePins] = useState(true)
+  const [newText, setNewText] = useState('')
+  const [editingDetails, setEditingDetails] = useState(false)
+  const [nameDraft, setNameDraft] = useState('')
+  const [aliasesDraft, setAliasesDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
-  const [mode, setMode] = useState<EditMode>(null)
-  const [draft, setDraft] = useState('')
-  const [changeType, setChangeType] = useState<ChangeType>('unspecified')
-  const operationId = useRef<string | null>(null)
   const load = useCallback(async () => {
-    setLoading(true)
     try {
-      setEntity(await docsService.get(id))
+      const [record, entries] = await Promise.all([
+        docsService.get(id),
+        docsService.sections(id),
+      ])
+      setEntity(record)
+      setSections(entries)
       setError('')
+      refreshSummary()
     } catch (cause) {
       setError(readableDocError(cause))
-    } finally {
-      setLoading(false)
     }
-  }, [id])
+  }, [id, refreshSummary])
   useEffect(() => {
     void load()
   }, [load])
-  const original =
-    mode === 'content'
-      ? entity?.content
-      : mode === 'name'
-        ? entity?.name
-        : entity?.aliases.join(', ')
-  const dirty = mode !== null && draft !== original
-  useEffect(() => {
-    if (!dirty) return
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-    }
-    const beforeNavigate = (event: Event) => {
-      if (!window.confirm('Discard unsaved document changes?'))
-        event.preventDefault()
-    }
-    window.addEventListener('beforeunload', beforeUnload)
-    window.addEventListener('docs-before-navigate', beforeNavigate)
-    return () => {
-      window.removeEventListener('beforeunload', beforeUnload)
-      window.removeEventListener('docs-before-navigate', beforeNavigate)
-    }
-  }, [dirty])
-  function start(nextMode: Exclude<EditMode, null>) {
-    if (!entity) return
-    setNotice('')
-    setMode(nextMode)
-    setDraft(
-      nextMode === 'content'
-        ? entity.content
-        : nextMode === 'name'
-          ? entity.name
-          : entity.aliases.join(', '),
-    )
-    setChangeType('unspecified')
-    operationId.current = null
-  }
-  async function refreshHistory() {
+  const ordered = [...sections].sort((a, b) => {
+    if (prioritizePins && a.pinned !== b.pinned) return a.pinned ? -1 : 1
+    const result = a.createdAt.localeCompare(b.createdAt)
+    return sort === 'oldest' ? result : -result
+  })
+  async function add(event: React.FormEvent) {
+    event.preventDefault()
+    setBusy(true)
     try {
-      setEdits(await docsService.history(id))
+      await docsService.mutate('add_section', {
+        entityId: id,
+        content: newText,
+      })
+      setNewText('')
+      await load()
     } catch (cause) {
       setError(readableDocError(cause))
+    } finally {
+      setBusy(false)
     }
   }
-  async function save(event: React.FormEvent) {
+  function startDetails() {
+    if (!entity) return
+    setNameDraft(entity.name)
+    setAliasesDraft(entity.aliases.join(', '))
+    setEditingDetails(true)
+  }
+  async function saveDetails(event: React.FormEvent) {
     event.preventDefault()
-    if (!entity || !mode) return
+    if (!entity) return
     setBusy(true)
     setError('')
     try {
-      const action =
-        mode === 'content'
-          ? 'update_content'
-          : mode === 'name'
-            ? 'rename'
-            : 'update_aliases'
-      const value =
-        mode === 'content'
-          ? { content: draft, changeType }
-          : mode === 'name'
-            ? { name: draft }
-            : {
-                aliases: draft
-                  .split(',')
-                  .map((alias) => alias.trim())
-                  .filter(Boolean),
-              }
-      operationId.current ??= crypto.randomUUID()
-      await docsService.mutate(
-        action,
-        { entityId: id, expectedRevision: entity.revision, ...value },
-        operationId.current,
-      )
-      operationId.current = null
-      setMode(null)
+      let revision = entity.revision
+      if (nameDraft.trim() !== entity.name) {
+        const result = await docsService.mutate('rename', {
+          entityId: id,
+          expectedRevision: revision,
+          name: nameDraft,
+        })
+        revision = result.revision
+      }
+      const nextAliases = aliasesDraft
+        .split(',')
+        .map((alias) => alias.trim())
+        .filter(Boolean)
+      if (JSON.stringify(nextAliases) !== JSON.stringify(entity.aliases)) {
+        await docsService.mutate('update_aliases', {
+          entityId: id,
+          expectedRevision: revision,
+          aliases: nextAliases,
+        })
+      }
+      setEditingDetails(false)
       await load()
-      if (edits) await refreshHistory()
-      setNotice('Document saved.')
     } catch (cause) {
       setError(readableDocError(cause))
     } finally {
@@ -380,15 +471,8 @@ function DocDetail({ type, id }: { type: EntityType; id: string }) {
     }
   }
   async function remove() {
-    if (
-      !entity ||
-      !window.confirm(
-        `Delete ${entity.name}? Its edit history will be preserved.`,
-      )
-    )
-      return
+    if (!entity || !window.confirm(`Delete ${entity.name}?`)) return
     setBusy(true)
-    setError('')
     try {
       await docsService.mutate('delete', {
         entityId: id,
@@ -397,209 +481,211 @@ function DocDetail({ type, id }: { type: EntityType; id: string }) {
       navigate(docPath(type))
     } catch (cause) {
       setError(readableDocError(cause))
-    } finally {
       setBusy(false)
     }
   }
-  if (loading && !entity)
+  if (!entity && !error)
     return (
       <main className="container page">
-        <p>Loading document…</p>
+        <p>Loading note…</p>
       </main>
     )
   return (
     <main className="container page docs-page">
-      <DocsNav active={type === 'friend' ? 'friends' : 'projects'} />
-      {notice && (
-        <p className="success" role="status">
-          {notice}
-        </p>
-      )}
+      <DocsNav
+        active={type === 'friend' ? 'friends' : 'projects'}
+        unread={unread}
+      />
       {error && (
-        <div className="error" role="alert">
-          {error}{' '}
-          {error.includes('changed elsewhere') && (
-            <button
-              onClick={() => {
-                setMode(null)
-                operationId.current = null
-                void load()
-              }}
-            >
-              Reload latest
-            </button>
-          )}
-        </div>
+        <p className="error" role="alert">
+          {error}
+        </p>
       )}
       {entity && (
         <>
-          <section className="card docs-panel">
-            <div className="docs-heading">
-              <div>
-                <p className="eyebrow">{type}</p>
-                <h1>{entity.name}</h1>
-                {entity.aliases.length > 0 && (
-                  <p className="muted">Also: {entity.aliases.join(', ')}</p>
-                )}
-              </div>
-              <span className="muted">Revision {entity.revision}</span>
+          <div className="docs-heading">
+            <div>
+              <p className="eyebrow">{type}</p>
+              <h1>{entity.name}</h1>
+              {entity.aliases.length > 0 && (
+                <p className="muted">Also: {entity.aliases.join(', ')}</p>
+              )}
             </div>
-            {entity.deleted ? (
-              <p>This document was deleted. Its history remains available.</p>
+            <div className="docs-actions">
+              <button onClick={startDetails}>Edit details</button>
+              <button
+                className="danger"
+                disabled={busy}
+                onClick={() => void remove()}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+          {editingDetails && (
+            <form
+              className="card docs-panel docs-form"
+              onSubmit={saveDetails}
+              aria-label="Edit details"
+            >
+              <label>
+                Name
+                <input
+                  required
+                  maxLength={120}
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                />
+              </label>
+              <label>
+                Aliases (comma-separated)
+                <input
+                  value={aliasesDraft}
+                  onChange={(event) => setAliasesDraft(event.target.value)}
+                />
+              </label>
+              <div className="docs-actions">
+                <button className="primary" disabled={busy}>
+                  Save details
+                </button>
+                <button type="button" onClick={() => setEditingDetails(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+          <form className="card docs-panel docs-form" onSubmit={add}>
+            <label>
+              New section
+              <textarea
+                required
+                rows={4}
+                maxLength={10000}
+                value={newText}
+                onChange={(event) => setNewText(event.target.value)}
+                placeholder={`Add a thought about ${entity.name}…`}
+              />
+            </label>
+            <button className="primary" disabled={busy || !newText.trim()}>
+              Add section
+            </button>
+          </form>
+          <div className="section-toolbar">
+            <label>
+              Order{' '}
+              <select
+                value={sort}
+                onChange={(event) =>
+                  setSort(event.target.value as 'newest' | 'oldest')
+                }
+              >
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+              </select>
+            </label>
+            <label className="compact-check">
+              <input
+                type="checkbox"
+                checked={!prioritizePins}
+                onChange={(event) => setPrioritizePins(!event.target.checked)}
+              />
+              Ignore pin priority
+            </label>
+          </div>
+          <section
+            className="sections-list"
+            aria-label={`${entity.name} sections`}
+          >
+            {!ordered.length ? (
+              <p className="muted">No sections yet.</p>
             ) : (
-              <>
-                {mode ? (
-                  <form
-                    className="docs-form"
-                    onSubmit={save}
-                    aria-label="Edit document"
-                  >
-                    <label>
-                      {mode === 'content'
-                        ? 'Document'
-                        : mode === 'name'
-                          ? 'Name'
-                          : 'Aliases (comma-separated)'}
-                      {mode === 'content' ? (
-                        <textarea
-                          rows={16}
-                          value={draft}
-                          onChange={(event) => {
-                            setDraft(event.target.value)
-                            operationId.current = null
-                          }}
-                        />
-                      ) : (
-                        <input
-                          required={mode === 'name'}
-                          value={draft}
-                          onChange={(event) => {
-                            setDraft(event.target.value)
-                            operationId.current = null
-                          }}
-                        />
-                      )}
-                    </label>
-                    {mode === 'content' && (
-                      <label>
-                        Change type
-                        <select
-                          value={changeType}
-                          onChange={(event) => {
-                            setChangeType(event.target.value as ChangeType)
-                            operationId.current = null
-                          }}
-                        >
-                          <option value="unspecified">Unspecified</option>
-                          <option value="correction">Correction</option>
-                          <option value="new_information">
-                            New information
-                          </option>
-                        </select>
-                      </label>
-                    )}
-                    <div className="docs-actions">
-                      <button className="primary" disabled={busy || !dirty}>
-                        {busy ? 'Saving…' : 'Save'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => setMode(null)}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <>
-                    <div className="doc-content">
-                      {entity.content || (
-                        <span className="muted">This document is empty.</span>
-                      )}
-                    </div>
-                    <div className="docs-actions">
-                      <button onClick={() => start('content')}>
-                        Edit document
-                      </button>
-                      <button onClick={() => start('name')}>Rename</button>
-                      <button onClick={() => start('aliases')}>
-                        Edit aliases
-                      </button>
-                      <button
-                        className="danger"
-                        disabled={busy}
-                        onClick={() => void remove()}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </>
-                )}
-              </>
+              ordered.map((section) => (
+                <SectionCard
+                  key={section.id}
+                  section={section}
+                  friend={type === 'friend'}
+                  onChanged={() => void load()}
+                />
+              ))
             )}
           </section>
-          <div>
-            <button
-              onClick={() => {
-                if (edits) setEdits(null)
-                else void refreshHistory()
-              }}
-            >
-              {edits ? 'Hide history' : 'View edit history'}
-            </button>
-          </div>
-          {edits && <EditHistory edits={edits} />}
         </>
       )}
     </main>
   )
 }
 
-function DocsNav({ active }: { active: 'chat' | 'friends' | 'projects' }) {
+function RecentProjects({
+  refreshKey,
+  onChanged,
+}: {
+  refreshKey: number
+  onChanged: () => void
+}) {
+  const [sections, setSections] = useState<DocSection[]>([])
+  const [error, setError] = useState('')
+  const load = useCallback(
+    () =>
+      docsService
+        .recentProjects(15)
+        .then(setSections)
+        .catch((cause) => setError(readableDocError(cause))),
+    [],
+  )
+  useEffect(() => {
+    void load()
+  }, [load, refreshKey])
   return (
-    <nav className="docs-tabs" aria-label="Docs navigation">
-      <a
-        href={href('/docs')}
-        aria-current={active === 'chat' ? 'page' : undefined}
-        onClick={(event) => {
-          event.preventDefault()
-          navigate('/docs')
-        }}
-      >
-        Chat
-      </a>
-      <a
-        href={href('/docs/friends')}
-        aria-current={active === 'friends' ? 'page' : undefined}
-        onClick={(event) => {
-          event.preventDefault()
-          navigate('/docs/friends')
-        }}
-      >
-        Friends
-      </a>
-      <a
-        href={href('/docs/projects')}
-        aria-current={active === 'projects' ? 'page' : undefined}
-        onClick={(event) => {
-          event.preventDefault()
-          navigate('/docs/projects')
-        }}
-      >
-        Projects
-      </a>
-    </nav>
+    <aside className="recent-projects" aria-label="Recent project sections">
+      <div className="recent-heading">
+        <h2>Recent projects</h2>
+        <Link to="/docs/projects">All projects</Link>
+      </div>
+      {error && <p className="error">{error}</p>}
+      {!sections.length ? (
+        <p className="muted">No project sections yet.</p>
+      ) : (
+        sections.map((section) => (
+          <SectionCard
+            key={section.id}
+            section={section}
+            friend={false}
+            onChanged={() => {
+              void load()
+              onChanged()
+            }}
+          />
+        ))
+      )}
+    </aside>
   )
 }
 
 export function Docs({ path }: { path: string; uid: string }) {
+  const [unread, setUnread] = useState(0)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const refreshSummary = useCallback(() => {
+    docsService
+      .summary()
+      .then((value) => setUnread(value.unreadFriends))
+      .catch(() => {})
+  }, [])
+  useEffect(() => {
+    refreshSummary()
+  }, [refreshSummary, path])
+  const changed = useCallback(() => {
+    refreshSummary()
+    setRefreshKey((value) => value + 1)
+  }, [refreshSummary])
   const segments = path.split('/').filter(Boolean)
   if (segments.length === 1)
     return (
       <main className="container page docs-page docs-chat-page">
-        <DocsNav active="chat" />
-        <DocsChat />
+        <DocsNav active="chat" unread={unread} />
+        <div className="docs-workspace">
+          <DocsChat onSaved={changed} />
+          <RecentProjects refreshKey={refreshKey} onChanged={changed} />
+        </div>
       </main>
     )
   const type =
@@ -616,8 +702,19 @@ export function Docs({ path }: { path: string; uid: string }) {
       </main>
     )
   return segments[2] ? (
-    <DocDetail key={segments[2]} type={type} id={segments[2]} />
+    <DocDetail
+      key={segments[2]}
+      type={type}
+      id={segments[2]}
+      unread={unread}
+      refreshSummary={refreshSummary}
+    />
   ) : (
-    <DocList key={type} type={type} />
+    <DocList
+      key={type}
+      type={type}
+      unread={unread}
+      refreshSummary={refreshSummary}
+    />
   )
 }

@@ -6,12 +6,10 @@ import {
 import { app } from './firebase'
 
 const functions = app ? getFunctions(app) : null
-if (functions && import.meta.env.VITE_USE_EMULATORS === 'true') {
+if (functions && import.meta.env.VITE_USE_EMULATORS === 'true')
   connectFunctionsEmulator(functions, '127.0.0.1', 5001)
-}
 
 export type EntityType = 'friend' | 'project'
-export type ChangeType = 'correction' | 'new_information' | 'unspecified'
 
 export interface DocEntity {
   id: string
@@ -19,30 +17,26 @@ export interface DocEntity {
   name: string
   normalizedName: string
   aliases: string[]
-  content: string
   revision: number
   deleted: boolean
+  unreadCount: number
+  sectionCount: number
   createdAt: string
   updatedAt: string
+  latestSectionAt: string | null
 }
 
-export interface DocEdit {
+export interface DocSection {
   id: string
-  eventId: string
-  operation: string
-  baseRevision: number
-  newRevision: number
-  patch: string
-  beforeHash: string
-  afterHash: string
-  source: 'manual' | 'ai_approved'
-  changeType: ChangeType
-  description: string
-  timestamp: string
-  beforeName: string
-  afterName: string
-  beforeAliases: string[]
-  afterAliases: string[]
+  entityId: string
+  entityType: EntityType
+  entityName: string
+  content: string
+  pinned: boolean
+  unread: boolean
+  revision: number
+  createdAt: string
+  updatedAt: string
 }
 
 export interface AiChoice {
@@ -50,53 +44,28 @@ export interface AiChoice {
   entityType: EntityType
   name: string
 }
-
 export interface AiReference {
   entityId: string
-  revision: number
-  eventIds: string[]
+  sectionIds: string[]
 }
-
-interface AiActionBase {
-  schemaVersion: 1
-  reason: string
-  changeType: ChangeType
-}
-
 export type AiMutation =
-  | (AiActionBase & {
+  | {
+      schemaVersion: 2
       action: 'create'
       entityType: EntityType
       name: string
-      content: string
-    })
-  | (AiActionBase & {
+      text: string
+      conflicts: string[]
+    }
+  | {
+      schemaVersion: 2
       action: 'add'
       entityType: EntityType
       entityId: string
       expectedRevision: number
-      scope: 'content'
-      newText: string
-      afterText: string | null
-    })
-  | (AiActionBase & {
-      action: 'modify'
-      entityType: EntityType
-      entityId: string
-      expectedRevision: number
-      scope: 'content'
-      oldText: string
-      newText: string
-    })
-  | (AiActionBase & {
-      action: 'delete'
-      entityType: EntityType
-      entityId: string
-      expectedRevision: number
-      scope: 'content' | 'entity'
-      oldText: string | null
-    })
-
+      text: string
+      conflicts: string[]
+    }
 export type AiResult =
   | {
       kind: 'query'
@@ -114,21 +83,27 @@ export type AiResult =
     }
   | {
       kind: 'proposal'
-      action: 'create' | 'add' | 'modify' | 'delete'
+      action: 'create' | 'add'
       proposalId: string
       requestId: string
       expiresAt: string
       targetName: string
       proposal: AiMutation
       preview: { before: string; after: string }
+      conflicts: DocSection[]
     }
 
 type Action =
   | 'list'
   | 'get'
-  | 'history'
+  | 'list_sections'
+  | 'recent_project_sections'
+  | 'summary'
   | 'create'
-  | 'update_content'
+  | 'add_section'
+  | 'update_section'
+  | 'set_section_pinned'
+  | 'set_section_unread'
   | 'rename'
   | 'update_aliases'
   | 'delete'
@@ -142,14 +117,12 @@ async function call<T>(
     functions,
     'docs_api',
   )
-  const result = await callable({ action, ...data })
-  return result.data
+  return (await callable({ action, ...data })).data
 }
 
 export const docsService = {
   async interpretMessage(
     message: string,
-    includeFullHistory: boolean,
     conversationId?: string,
     requestId: string = crypto.randomUUID(),
     selectedEntityId?: string,
@@ -158,44 +131,39 @@ export const docsService = {
     const callable = httpsCallable<Record<string, unknown>, AiResult>(
       functions,
       'interpretMessage',
-      {
-        timeout: 120000,
-      },
+      { timeout: 120000 },
     )
-    const result = await callable({
-      message,
-      includeFullHistory,
-      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-      ...(conversationId ? { conversationId } : {}),
-      ...(selectedEntityId ? { selectedEntityId } : {}),
-      requestId,
-    })
-    return result.data
+    return (
+      await callable({
+        message,
+        requestId,
+        ...(conversationId ? { conversationId } : {}),
+        ...(selectedEntityId ? { selectedEntityId } : {}),
+      })
+    ).data
   },
   async approveAction(
     proposalId: string,
-    replacementText?: string,
     approvalRequestId: string = crypto.randomUUID(),
-    entityName?: string,
   ) {
     if (!functions) throw new Error('Firebase is not configured.')
     const callable = httpsCallable<
       Record<string, unknown>,
       {
         entityId: string
+        sectionId: string
         entityType: EntityType
         name: string
         revision: number
         status: string
       }
     >(functions, 'approveAction')
-    const result = await callable({
-      proposalId,
-      ...(replacementText !== undefined ? { replacementText } : {}),
-      ...(entityName !== undefined ? { entityName } : {}),
-      approvalRequestId,
-    })
-    return result.data
+    return (
+      await callable({
+        proposalId,
+        approvalRequestId,
+      })
+    ).data
   },
   async rejectAction(proposalId: string) {
     if (!functions) throw new Error('Firebase is not configured.')
@@ -203,8 +171,7 @@ export const docsService = {
       functions,
       'rejectAction',
     )
-    const result = await callable({ proposalId })
-    return result.data
+    return (await callable({ proposalId })).data
   },
   async list(entityType: EntityType) {
     return (await call<{ entities: DocEntity[] }>('list', { entityType }))
@@ -213,22 +180,41 @@ export const docsService = {
   async get(entityId: string) {
     return (await call<{ entity: DocEntity }>('get', { entityId })).entity
   },
-  async history(entityId: string) {
-    return (await call<{ edits: DocEdit[] }>('history', { entityId })).edits
+  async sections(entityId: string) {
+    return (
+      await call<{ sections: DocSection[] }>('list_sections', { entityId })
+    ).sections
+  },
+  async recentProjects(limit = 15) {
+    return (
+      await call<{ sections: DocSection[] }>('recent_project_sections', {
+        limit,
+      })
+    ).sections
+  },
+  async summary() {
+    return call<{ unreadFriends: number }>('summary', {})
   },
   async mutate(
     action: Extract<
       Action,
-      'create' | 'update_content' | 'rename' | 'update_aliases' | 'delete'
+      | 'create'
+      | 'add_section'
+      | 'update_section'
+      | 'set_section_pinned'
+      | 'set_section_unread'
+      | 'rename'
+      | 'update_aliases'
+      | 'delete'
     >,
     data: Record<string, unknown>,
     operationId: string = crypto.randomUUID(),
   ) {
     return call<{
       id: string
+      sectionId?: string
       revision: number
       changed: boolean
-      alreadyProcessed?: boolean
     }>(action, { ...data, operationId })
   },
 }
@@ -236,8 +222,8 @@ export const docsService = {
 export function readableDocError(error: unknown): string {
   const text =
     error instanceof Error ? error.message : 'Unable to save. Please try again.'
-  if (/aborted|changed elsewhere/i.test(text))
-    return 'This document changed elsewhere. Reload it before saving your edits.'
+  if (/aborted|changed elsewhere|stale/i.test(text))
+    return 'This item changed elsewhere. Reload it before saving your edits.'
   if (/unavailable|network|offline/i.test(text))
     return 'Docs is unavailable right now. Check your connection and try again.'
   return text

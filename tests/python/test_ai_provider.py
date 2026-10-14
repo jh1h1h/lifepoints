@@ -13,7 +13,7 @@ def test_provider_uses_json_mode_model_and_server_key(monkeypatch):
     def respond(request):
         requests.append(request)
         return httpx.Response(200, json={"id": "res-1", "choices": [{"finish_reason": "stop", "message": {
-            "content": json.dumps({"schemaVersion": 1, "action": "query", "answer": "Unknown", "references": []})}}],
+            "content": json.dumps({"schemaVersion": 2, "action": "query", "answer": "Unknown", "references": []})}}],
             "usage": {"prompt_tokens": 12, "completion_tokens": 8}})
 
     monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-pro")

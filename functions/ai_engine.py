@@ -1,10 +1,6 @@
-"""Owner-scoped interpretation, persisted proposals, and atomic approvals."""
-
-import hashlib
-import json
-import uuid
+"""DeepSeek routing/query flow with exact-text section approvals."""
+import hashlib, json, uuid
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from google.api_core.exceptions import Aborted, AlreadyExists, Conflict
 from google.cloud import firestore
@@ -13,403 +9,172 @@ from pydantic import ValidationError
 from ai_context import ContextFailure, ContextRetriever
 from ai_prompt import PROMPT_VERSION, SYSTEM_PROMPT
 from ai_provider import ProviderFailure
-from ai_schema import (AddAction, ClarifyAction, CreateAction, DeleteAction,
-                       ModifyAction, QueryAction, parse_action)
-from docs_delta import content_hash, make_patch
+from ai_schema import AddAction, ClarifyAction, CreateAction, QueryAction, parse_action
 from docs_service import ID_PATTERN
 
-
 class EngineFailure(Exception):
-    def __init__(self, code: str, message: str, details: dict | None = None):
-        super().__init__(message)
-        self.code = code
-        self.details = details
+    def __init__(self, code, message, details=None):
+        super().__init__(message); self.code = code; self.details = details
 
-
-def _validation_reason(exc: ValidationError | ValueError) -> str:
-    if isinstance(exc, ValidationError):
-        issues = []
-        for item in exc.errors(include_input=False, include_url=False)[:3]:
-            path = ".".join(str(part) for part in item["loc"])
-            issues.append(f"{path}: {item['msg']}" if path else item["msg"])
-        return "Model response did not match the required action format: " + "; ".join(issues)
-    return f"Model response could not be parsed: {exc}"
-
+def _utcnow(): return datetime.now(timezone.utc)
 
 def _id(value, label):
     if not isinstance(value, str) or not ID_PATTERN.fullmatch(value):
         raise EngineFailure("invalid-argument", f"A valid {label} is required")
     return value
 
-
-def _utcnow():
-    return datetime.now(timezone.utc)
-
-
-def _candidate_choice(record: dict) -> dict:
-    return {"entityId": record["id"], "entityType": record["entityType"], "name": record["name"]}
-
-
-def _unique_span(content: str, span: str) -> bool:
-    return bool(span) and content.count(span) == 1
-
-
-def _apply(action, before: str, replacement: str | None = None) -> str:
-    if isinstance(action, AddAction):
-        new = action.newText if replacement is None else replacement
-        if not new or len(new) > 10000:
-            raise EngineFailure("invalid-argument", "Added text must be 1–10,000 characters")
-        if action.afterText is None:
-            return before + ("\n" if before and not before.endswith("\n") else "") + new
-        if not _unique_span(before, action.afterText):
-            raise EngineFailure("failed-precondition", "Insertion anchor is missing or ambiguous")
-        end = before.index(action.afterText) + len(action.afterText)
-        prefix, suffix = before[:end], before[end:]
-        insertion = ("\n" if prefix and not prefix.endswith("\n") else "") + new
-        if suffix and not insertion.endswith("\n"):
-            insertion += "\n"
-        return prefix + insertion + suffix
-    if isinstance(action, (ModifyAction, DeleteAction)) and action.scope == "content":
-        old = action.oldText
-        if not _unique_span(before, old):
-            raise EngineFailure("failed-precondition", "Original text is missing or ambiguous")
-        if isinstance(action, ModifyAction) and old == before and len(before.splitlines()) > 1:
-            raise EngineFailure("failed-precondition", "A whole-document replacement is too broad; propose a smaller exact span")
-        new = (action.newText if isinstance(action, ModifyAction) else "") if replacement is None else replacement
-        if len(new) > 10000:
-            raise EngineFailure("invalid-argument", "Replacement text is too long")
-        return before.replace(old, new, 1)
-    raise EngineFailure("invalid-argument", "Unsupported content operation")
-
+def _choice(record):
+    return {"entityId":record["id"],"entityType":record["entityType"],"name":record["name"]}
 
 class ActionEngine:
-    def __init__(self, db, uid: str, provider):
-        if not uid:
-            raise EngineFailure("unauthenticated", "Sign in to use Docs AI")
-        self.db = db
-        self.uid = uid
-        self.provider = provider
+    def __init__(self, db, uid, provider):
+        if not uid: raise EngineFailure("unauthenticated", "Sign in to use Docs AI")
+        self.db, self.uid, self.provider = db, uid, provider
         self.user = db.collection("users").document(uid)
         self.docs = self.user.collection("docs")
 
-    def _start_request(self, request_id: str, fingerprint: str):
-        reference = self.user.collection("aiRequests").document(request_id)
+    def _start(self, request_id, fingerprint):
+        ref = self.user.collection("aiRequests").document(request_id)
         try:
-            reference.create({"requestHash": fingerprint, "status": "processing", "createdAt": _utcnow()})
-            return reference, None
+            ref.create({"requestHash":fingerprint,"status":"processing","createdAt":_utcnow()})
+            return ref, None
         except (AlreadyExists, Conflict):
-            previous = reference.get().to_dict()
-            if previous["requestHash"] != fingerprint:
-                raise EngineFailure("already-exists", "This request ID was used for a different message")
-            if previous["status"] == "completed":
-                return reference, previous["response"]
-            if previous["status"] == "failed":
-                raise EngineFailure(previous["errorCode"], previous["errorMessage"], previous.get("errorDetails"))
-            raise EngineFailure("unavailable", "This request is still processing; check its request ID before resending")
+            prior = ref.get().to_dict()
+            if prior["requestHash"] != fingerprint: raise EngineFailure("already-exists", "This request ID was used for a different message")
+            if prior["status"] == "completed": return ref, prior["response"]
+            if prior["status"] == "failed": raise EngineFailure(prior["errorCode"], prior["errorMessage"], prior.get("errorDetails"))
+            raise EngineFailure("unavailable", "This request is still processing")
 
-    def _finish(self, request_ref, response: dict, conversation: dict | None = None):
-        stored_proposal = response.pop("_storedProposal", None)
-        transaction = self.db.transaction()
+    def _finish(self, ref, response, conversation=None):
+        stored = response.pop("_storedProposal", None)
+        tx = self.db.transaction()
         @firestore.transactional
-        def commit(tx):
-            if stored_proposal is not None:
-                tx.create(self.user.collection("aiProposals").document(response["proposalId"]), stored_proposal)
-            if conversation is not None:
-                tx.set(self.user.collection("aiConversations").document(response["conversationId"]), conversation)
-            tx.update(request_ref, {"status": "completed", "response": response, "completedAt": _utcnow()})
-        commit(transaction)
+        def commit(transaction):
+            if stored: transaction.create(self.user.collection("aiProposals").document(response["proposalId"]), stored)
+            if conversation: transaction.set(self.user.collection("aiConversations").document(response["conversationId"]), conversation)
+            transaction.update(ref, {"status":"completed","response":response,"completedAt":_utcnow()})
+        commit(tx)
         return response
 
-    def _conversation(self, conversation_id: str | None):
-        if not conversation_id:
-            return None
-        snapshot = self.user.collection("aiConversations").document(conversation_id).get()
-        if not snapshot.exists:
-            return None
-        data = snapshot.to_dict()
-        return data if data["expiresAt"] > _utcnow() else None
+    def _conversation(self, ident):
+        if not ident: return None
+        snap = self.user.collection("aiConversations").document(ident).get()
+        return snap.to_dict() if snap.exists and snap.to_dict()["expiresAt"] > _utcnow() else None
 
-    def interpret(self, request: dict):
-        if not isinstance(request, dict):
-            raise EngineFailure("invalid-argument", "Request must be an object")
+    def interpret(self, request):
+        if not isinstance(request, dict): raise EngineFailure("invalid-argument", "Request must be an object")
         message = request.get("message")
         if not isinstance(message, str) or not message.strip() or len(message) > 4000:
             raise EngineFailure("invalid-argument", "Message must contain 1–4,000 characters")
-        if type(request.get("includeFullHistory", False)) is not bool:
-            raise EngineFailure("invalid-argument", "includeFullHistory must be Boolean")
-        include_full_history = request.get("includeFullHistory", False)
-        time_zone = request.get("timeZone", "UTC")
-        if not isinstance(time_zone, str) or not time_zone or len(time_zone) > 100:
-            raise EngineFailure("invalid-argument", "timeZone must be a valid IANA timezone")
-        try:
-            local_zone = ZoneInfo(time_zone)
-        except (ZoneInfoNotFoundError, ValueError) as exc:
-            raise EngineFailure("invalid-argument", "timeZone must be a valid IANA timezone") from exc
         request_id = _id(request.get("requestId"), "requestId")
-        conversation_id = request.get("conversationId")
-        if conversation_id is not None:
-            _id(conversation_id, "conversationId")
-        selected_id = request.get("selectedEntityId")
-        if selected_id is not None:
-            _id(selected_id, "selectedEntityId")
-            if conversation_id is None:
-                raise EngineFailure("invalid-argument", "A selected entity requires a clarification conversation")
-        fingerprint = hashlib.sha256(json.dumps({"message": message, "full": include_full_history, "timeZone": time_zone,
-                                                 "conversationId": conversation_id, "selectedEntityId": selected_id}, sort_keys=True).encode()).hexdigest()
-        request_ref, saved = self._start_request(request_id, fingerprint)
-        if saved is not None:
-            return saved
-        diagnostics: dict[str, str] = {}
+        conversation_id, selected_id = request.get("conversationId"), request.get("selectedEntityId")
+        if conversation_id is not None: _id(conversation_id, "conversationId")
+        if selected_id is not None: _id(selected_id, "selectedEntityId")
+        fingerprint = hashlib.sha256(json.dumps({"message":message,"conversationId":conversation_id,"selectedEntityId":selected_id}, sort_keys=True).encode()).hexdigest()
+        ref, saved = self._start(request_id, fingerprint)
+        if saved is not None: return saved
+        diagnostics = {"requestId":request_id}
         try:
-            response, conversation = self._interpret_new(message, include_full_history, conversation_id, request_id, selected_id, diagnostics, local_zone, time_zone)
-            return self._finish(request_ref, response, conversation)
-        except (EngineFailure, ContextFailure, ProviderFailure) as exc:
-            code = exc.code if isinstance(exc, (EngineFailure, ContextFailure)) else {
-                "configuration": "failed-precondition", "timeout": "deadline-exceeded",
-                "rate_limit": "resource-exhausted"}.get(exc.code, "unavailable")
-            details = {"reason": str(exc), "requestId": request_id, **diagnostics}
-            if isinstance(exc, ProviderFailure) and exc.raw_response is not None:
-                details["rawResponse"] = exc.raw_response
-            if isinstance(exc, EngineFailure) and exc.details:
-                details.update(exc.details)
-            request_ref.update({"status": "failed", "errorCode": code, "errorMessage": str(exc),
-                                "errorDetails": details, "completedAt": _utcnow()})
-            raise EngineFailure(code, str(exc), details) from exc
-        except (ValidationError, ValueError) as exc:
-            reason = _validation_reason(exc)
-            details = {"reason": reason, "requestId": request_id, **diagnostics}
-            request_ref.update({"status": "failed", "errorCode": "failed-precondition",
-                                "errorMessage": reason, "errorDetails": details, "completedAt": _utcnow()})
-            raise EngineFailure("failed-precondition", reason, details) from exc
-        except Aborted as exc:
-            raise EngineFailure("aborted", "A concurrent edit changed this request; try again") from exc
+            prior = self._conversation(conversation_id)
+            if selected_id and (not prior or selected_id not in prior["candidateIds"]):
+                raise EngineFailure("permission-denied", "Selected note was not a clarification choice")
+            original = prior["originalMessage"] if prior else message
+            allowed = [selected_id] if selected_id else (prior["candidateIds"] if prior else None)
+            context = ContextRetriever(self.db, self.uid).retrieve(message, allowed)
+            user_text = (f"Original statement (save exactly): {original}\nClarification response: {message}" + (f"\nSelected entity ID: {selected_id}" if selected_id else "")) if prior else message
+            reply = self.provider.complete([{"role":"system","content":SYSTEM_PROMPT},{"role":"user","content":json.dumps({"userMessage":user_text,"context":json.loads(context.context_text)}, ensure_ascii=False)}], request_id)
+            diagnostics.update({"rawResponse":reply.content,"modelResponseId":reply.response_id})
+            action = parse_action(reply.content)
+            candidates = {item["id"]:item for item in context.candidates}
+            if isinstance(action, QueryAction):
+                for reference in action.references:
+                    known = {s["id"] for s in context.sections.get(reference.entityId, [])}
+                    if reference.entityId not in candidates or not set(reference.sectionIds) <= known:
+                        raise EngineFailure("failed-precondition", "Query cited an unavailable section")
+                response = {"kind":"query","action":"query","answer":action.answer,"references":[r.model_dump() for r in action.references],"requestId":request_id}
+                return self._finish(ref, response)
+            if isinstance(action, ClarifyAction):
+                for choice in action.choices:
+                    target = candidates.get(choice.entityId)
+                    if not target or target["name"] != choice.name or target["entityType"] != choice.entityType:
+                        raise EngineFailure("failed-precondition", "Clarification included an unavailable choice")
+                ident = conversation_id or str(uuid.uuid4())
+                response = {"kind":"clarify","action":"clarify","question":action.question,"choices":[c.model_dump() for c in action.choices],"conversationId":ident}
+                state = {"originalMessage":original,"candidateIds":list(candidates),"expiresAt":_utcnow()+timedelta(hours=24)}
+                return self._finish(ref, response, state)
+            if isinstance(action, AddAction):
+                target = candidates.get(action.entityId)
+                if not target or target["entityType"] != action.entityType: raise EngineFailure("permission-denied", "Proposed target was not in the retrieved context")
+                if target["revision"] != action.expectedRevision: raise EngineFailure("aborted", "Model used a stale note revision")
+                known_sections = {s["id"]:s for s in context.sections.get(action.entityId, [])}
+                if not set(action.conflicts) <= set(known_sections): raise EngineFailure("failed-precondition", "Conflict check cited an unavailable section")
+                entity_id, target_name = action.entityId, target["name"]
+                conflicts = [known_sections[item] for item in action.conflicts]
+                proposal = {**action.model_dump(), "text":original}
+            else:
+                if not isinstance(action, CreateAction): raise EngineFailure("failed-precondition", "Unsupported action")
+                entity_id, target_name, conflicts = self.docs.document().id, action.name, []
+                proposal = {**action.model_dump(), "text":original}
+            proposal_id = self.user.collection("aiProposals").document().id
+            expires = _utcnow()+timedelta(hours=24)
+            stored = {"requestId":request_id,"ownerUid":self.uid,"action":proposal,"entityId":entity_id,"status":"pending","createdAt":_utcnow(),"expiresAt":expires,"promptVersion":PROMPT_VERSION}
+            response = {"kind":"proposal","action":action.action,"proposalId":proposal_id,"requestId":request_id,"expiresAt":expires.isoformat(),"targetName":target_name,"proposal":proposal,"preview":{"before":"","after":original},"conflicts":conflicts,"_storedProposal":stored}
+            return self._finish(ref, response)
+        except (EngineFailure, ContextFailure, ProviderFailure, ValidationError, ValueError) as exc:
+            if isinstance(exc, (EngineFailure, ContextFailure)): code = exc.code
+            elif isinstance(exc, ProviderFailure): code = {"configuration":"failed-precondition","timeout":"deadline-exceeded","rate_limit":"resource-exhausted"}.get(exc.code,"unavailable")
+            else: code = "failed-precondition"
+            message_out = str(exc) if not isinstance(exc, ValidationError) else "Model response did not match the routing format"
+            details = {**diagnostics,"reason":message_out}
+            ref.update({"status":"failed","errorCode":code,"errorMessage":message_out,"errorDetails":details,"completedAt":_utcnow()})
+            raise EngineFailure(code, message_out, details) from exc
 
-    def _interpret_new(self, message: str, include_full_history: bool, conversation_id: str | None, request_id: str, selected_id: str | None, diagnostics: dict[str, str], local_zone: ZoneInfo, time_zone: str):
-        prior = self._conversation(conversation_id)
-        if selected_id and (not prior or selected_id not in prior["candidateIds"]):
-            raise EngineFailure("permission-denied", "Selected document was not a clarification choice")
-        original = prior["originalMessage"] if prior else message
-        allowed_ids = [selected_id] if selected_id else (prior["candidateIds"] if prior else None)
-        context = ContextRetriever(self.db, self.uid).retrieve(message, include_full_history, allowed_ids)
-        candidates = context.candidates
-        conversation_text = (f"Original user message: {original}\nClarification: {message}"
-                             + (f"\nSelected entity ID: {selected_id}" if selected_id else "")) if prior else message
-        prompt_data = {"userMessage": conversation_text, "includeFullHistory": include_full_history,
-                       "referenceLocalDateTime": _utcnow().astimezone(local_zone).isoformat(timespec="seconds"),
-                       "timeZone": time_zone,
-                       "context": json.loads(context.context_text)}
-        reply = self.provider.complete([{"role": "system", "content": SYSTEM_PROMPT},
-                                        {"role": "user", "content": json.dumps(prompt_data, ensure_ascii=False)}], request_id)
-        diagnostics["rawResponse"] = reply.content
-        if reply.response_id:
-            diagnostics["modelResponseId"] = reply.response_id
-        action = parse_action(reply.content)
-        self._validate(action, context, include_full_history)
-        usage = {"promptTokens": reply.prompt_tokens, "completionTokens": reply.completion_tokens,
-                 "latencyMs": reply.latency_ms, "modelResponseId": reply.response_id,
-                 "promptVersion": PROMPT_VERSION}
-        if isinstance(action, QueryAction):
-            return ({"kind": "query", "action": "query", "answer": action.answer,
-                     "references": [item.model_dump() for item in action.references], "requestId": request_id,
-                     "usage": usage}, None)
-        if isinstance(action, ClarifyAction):
-            return self._clarify(action.question, candidates, conversation_id, original, action.choices, usage)
-        proposal_ref = self.user.collection("aiProposals").document()
-        proposal = action.model_dump()
-        if isinstance(action, CreateAction):
-            target_id = self.docs.document().id
-            before = ""
-            after = action.content
-        elif isinstance(action, DeleteAction) and action.scope == "entity":
-            before = candidates[0]["content"]
-            after = before
-        else:
-            target = next(item for item in candidates if item["id"] == action.entityId)
-            before = target["content"]
-            after = _apply(action, before)
-        if len(after) > 200000 or (not isinstance(action, CreateAction) and before == after and not (isinstance(action, DeleteAction) and action.scope == "entity")):
-            raise EngineFailure("failed-precondition", "Proposal has no safe, meaningful change")
-        expires = _utcnow() + timedelta(hours=24)
-        stored = {"requestId": request_id, "ownerUid": self.uid, "action": proposal,
-                  "expectedRevision": None if isinstance(action, CreateAction) else action.expectedRevision,
-                  "entityId": target_id if isinstance(action, CreateAction) else action.entityId,
-                  "beforeHash": content_hash(before), "createdAt": _utcnow(), "expiresAt": expires,
-                  "status": "pending", "promptVersion": PROMPT_VERSION}
-        response = {"kind": "proposal", "action": action.action, "proposalId": proposal_ref.id,
-                    "requestId": request_id, "expiresAt": expires.isoformat(), "proposal": proposal,
-                    "targetName": action.name if isinstance(action, CreateAction) else next(item["name"] for item in candidates if item["id"] == action.entityId),
-                    "preview": {"before": before, "after": after}, "usage": usage,
-                    "_storedProposal": stored}
-        return response, None
-
-    def _clarify(self, question, candidates, conversation_id, original, choices=None, usage=None):
-        chosen = [item.model_dump() for item in choices] if choices else [_candidate_choice(item) for item in candidates]
-        ident = conversation_id or str(uuid.uuid4())
-        response = {"kind": "clarify", "action": "clarify", "question": question,
-                    "choices": chosen, "conversationId": ident}
-        if usage:
-            response["usage"] = usage
-        state = {"originalMessage": original, "candidateIds": [item["id"] for item in candidates],
-                 "expiresAt": _utcnow() + timedelta(hours=24)}
-        return response, state
-
-    def _validate(self, action, context, full_history):
-        candidates = {item["id"]: item for item in context.candidates}
-        if isinstance(action, CreateAction):
-            if not action.name.strip():
-                raise EngineFailure("failed-precondition", "A name is required")
-        elif isinstance(action, (AddAction, ModifyAction, DeleteAction)):
-            target = candidates.get(action.entityId)
-            if not target or target["entityType"] != action.entityType:
-                raise EngineFailure("permission-denied", "Proposed target was not in the retrieved owner context")
-            if action.expectedRevision != target["revision"]:
-                raise EngineFailure("aborted", "Model used a stale document revision")
-            if not (isinstance(action, DeleteAction) and action.scope == "entity"):
-                _apply(action, target["content"])
-        elif isinstance(action, QueryAction):
-            for reference in action.references:
-                target = candidates.get(reference.entityId)
-                if not target or target["revision"] != reference.revision:
-                    raise EngineFailure("failed-precondition", "Query cited an unavailable document")
-                known_events = {event["eventId"] for event in context.histories.get(reference.entityId, [])}
-                if not set(reference.eventIds) <= known_events:
-                    raise EngineFailure("failed-precondition", "Query cited unavailable history")
-                if reference.eventIds and not full_history:
-                    raise EngineFailure("failed-precondition", "Current-only query cannot cite history")
-            if candidates and not action.references:
-                raise EngineFailure("failed-precondition", "Query must cite the retrieved document")
-        elif isinstance(action, ClarifyAction):
-            for choice in action.choices:
-                target = candidates.get(choice.entityId)
-                if not target or target["name"] != choice.name or target["entityType"] != choice.entityType:
-                    raise EngineFailure("failed-precondition", "Clarification included an unavailable choice")
-
-    def approve(self, request: dict):
-        if not isinstance(request, dict):
-            raise EngineFailure("invalid-argument", "Request must be an object")
-        proposal_id = _id(request.get("proposalId"), "proposalId")
-        approval_id = _id(request.get("approvalRequestId"), "approvalRequestId")
-        replacement = request.get("replacementText")
-        if replacement is not None and (not isinstance(replacement, str) or len(replacement) > 10000):
-            raise EngineFailure("invalid-argument", "Replacement text is invalid or too long")
-        edited_name = request.get("entityName")
-        if edited_name is not None and (not isinstance(edited_name, str) or not edited_name.strip() or len(edited_name) > 120):
-            raise EngineFailure("invalid-argument", "Entity name must contain 1–120 characters")
+    def approve(self, request):
+        if not isinstance(request, dict): raise EngineFailure("invalid-argument", "Request must be an object")
+        proposal_id, approval_id = _id(request.get("proposalId"),"proposalId"), _id(request.get("approvalRequestId"),"approvalRequestId")
         proposal_ref = self.user.collection("aiProposals").document(proposal_id)
         approval_ref = self.user.collection("aiApprovals").document(approval_id)
         tx = self.db.transaction()
-
         @firestore.transactional
         def commit(transaction):
             previous = approval_ref.get(transaction=transaction)
             if previous.exists:
-                data = previous.to_dict()
-                if (data["proposalId"] != proposal_id or data.get("replacementText") != replacement
-                        or data.get("entityName") != edited_name):
-                    raise EngineFailure("already-exists", "Approval request ID was reused for a different approval")
-                return {**data["result"], "alreadyProcessed": True}
-            snapshot = proposal_ref.get(transaction=transaction)
-            if not snapshot.exists:
-                raise EngineFailure("not-found", "Proposal not found for this account")
-            proposal = snapshot.to_dict()
-            if proposal["status"] != "pending":
-                raise EngineFailure("failed-precondition", "Proposal is no longer pending")
-            if proposal["expiresAt"] <= _utcnow():
-                transaction.update(proposal_ref, {"status": "expired"})
-                return {"expired": True}
-            action = parse_action(json.dumps(proposal["action"]))
-            if edited_name is not None and not isinstance(action, CreateAction):
-                raise EngineFailure("invalid-argument", "Only creation proposals can edit the entity name")
-            entity_ref = self.docs.document(proposal["entityId"])
-            current = None if isinstance(action, CreateAction) else entity_ref.get(transaction=transaction)
-            if current is not None and (not current.exists or current.to_dict()["deleted"]):
-                raise EngineFailure("not-found", "Target document was deleted")
-            before = "" if current is None else current.to_dict()["content"]
-            if content_hash(before) != proposal["beforeHash"]:
-                raise EngineFailure("aborted", "Document content changed; proposal is stale")
-            if current is not None and current.to_dict()["revision"] != proposal["expectedRevision"]:
-                raise EngineFailure("aborted", "Document revision changed; proposal is stale")
-            if isinstance(action, CreateAction):
-                after = action.content if replacement is None else replacement
-                if len(after) > 200000:
-                    raise EngineFailure("invalid-argument", "Initial document is too long")
-                now = _utcnow()
-                name = (edited_name if edited_name is not None else action.name).strip()
-                entity = {"entityType": action.entityType, "name": name,
-                          "normalizedName": name.casefold(), "aliases": [],
-                          "content": after, "revision": 1, "deleted": False,
-                          "createdAt": now, "updatedAt": now}
-                base_revision, new_revision = 0, 1
+                if previous.to_dict()["proposalId"] != proposal_id:
+                    raise EngineFailure("already-exists", "Approval request ID was reused for another proposal")
+                return {**previous.to_dict()["result"],"alreadyProcessed":True}
+            snap = proposal_ref.get(transaction=transaction)
+            if not snap.exists or snap.to_dict()["status"] != "pending": raise EngineFailure("failed-precondition", "Proposal is no longer pending")
+            saved = snap.to_dict(); action = saved["action"]
+            if saved["expiresAt"] <= _utcnow(): raise EngineFailure("failed-precondition", "Proposal expired")
+            now = _utcnow(); entity_ref = self.docs.document(saved["entityId"]); section_ref = entity_ref.collection("sections").document()
+            if action["action"] == "create":
+                name = action["name"]
+                unread = action["entityType"] == "friend"
+                entity = {"entityType":action["entityType"],"name":name,"normalizedName":name.casefold(),"aliases":[],"revision":1,"deleted":False,"unreadCount":1 if unread else 0,"sectionCount":1,"latestSectionAt":now,"createdAt":now,"updatedAt":now}
                 transaction.create(entity_ref, entity)
             else:
-                now = _utcnow()
-                entity = dict(current.to_dict())
-                base_revision = entity["revision"]
-                new_revision = base_revision + 1
-                if isinstance(action, DeleteAction) and replacement is not None:
-                    raise EngineFailure("invalid-argument", "Deletion proposals cannot be converted into replacements")
-                if isinstance(action, DeleteAction) and action.scope == "entity":
-                    after = before
-                    entity["deleted"] = True
-                else:
-                    after = _apply(action, before, replacement)
-                    if after == before or len(after) > 200000:
-                        raise EngineFailure("failed-precondition", "Edited proposal makes no safe change")
-                    entity["content"] = after
-                entity["revision"] = new_revision
-                entity["updatedAt"] = now
+                current = entity_ref.get(transaction=transaction)
+                if not current.exists or current.to_dict().get("deleted"): raise EngineFailure("not-found", "Target note was deleted")
+                entity = current.to_dict()
+                if entity.get("revision",1) != action["expectedRevision"]: raise EngineFailure("aborted", "Target note changed; regenerate the proposal")
+                unread = entity["entityType"] == "friend"
+                entity["revision"] = entity.get("revision",1)+1; entity["sectionCount"] = entity.get("sectionCount",0)+1
+                entity["unreadCount"] = entity.get("unreadCount",0)+(1 if unread else 0); entity["latestSectionAt"] = now; entity["updatedAt"] = now
                 transaction.set(entity_ref, entity)
-            event = {"eventId": approval_id, "operation": action.action,
-                     "baseRevision": base_revision, "newRevision": new_revision,
-                     "patch": make_patch(before, after), "beforeHash": content_hash(before),
-                     "afterHash": content_hash(after), "source": "ai_approved",
-                     "changeType": action.changeType, "description": action.reason,
-                     "timestamp": now, "beforeName": "" if current is None else entity["name"],
-                     "afterName": entity["name"], "beforeAliases": [] if current is None else entity["aliases"],
-                     "afterAliases": entity["aliases"]}
-            transaction.create(entity_ref.collection("edits").document(approval_id), event)
-            result = {"entityId": entity_ref.id, "entityType": entity["entityType"],
-                      "name": entity["name"], "revision": new_revision, "status": "approved"}
-            transaction.update(proposal_ref, {"status": "approved", "approvedAt": now,
-                                              "approvalRequestId": approval_id, "result": result})
-            transaction.create(approval_ref, {"proposalId": proposal_id,
-                                               "replacementText": replacement, "entityName": edited_name,
-                                               "result": result, "createdAt": now})
+            transaction.create(section_ref, {"content":action["text"],"pinned":False,"unread":unread,"revision":1,"createdAt":now,"updatedAt":now})
+            result = {"entityId":entity_ref.id,"sectionId":section_ref.id,"entityType":entity["entityType"],"name":entity["name"],"revision":entity["revision"],"status":"approved"}
+            transaction.update(proposal_ref,{"status":"approved","approvedAt":now,"approvalRequestId":approval_id,"result":result})
+            transaction.create(approval_ref,{"proposalId":proposal_id,"result":result,"createdAt":now})
             return result
+        try: return commit(tx)
+        except Aborted as exc: raise EngineFailure("aborted", "A concurrent change made this proposal stale") from exc
 
-        try:
-            result = commit(tx)
-        except Aborted as exc:
-            raise EngineFailure("aborted", "A concurrent edit changed this proposal; reload before approving") from exc
-        if result.get("expired"):
-            raise EngineFailure("failed-precondition", "Proposal expired; ask again for a new proposal")
-        return result
-
-    def reject(self, request: dict):
-        if not isinstance(request, dict):
-            raise EngineFailure("invalid-argument", "Request must be an object")
-        proposal_id = _id(request.get("proposalId"), "proposalId")
-        proposal_ref = self.user.collection("aiProposals").document(proposal_id)
-        tx = self.db.transaction()
-        @firestore.transactional
-        def commit(transaction):
-            snapshot = proposal_ref.get(transaction=transaction)
-            if not snapshot.exists:
-                raise EngineFailure("not-found", "Proposal not found for this account")
-            status = snapshot.to_dict()["status"]
-            if status == "rejected":
-                return {"status": "rejected", "alreadyProcessed": True}
-            if status != "pending":
-                raise EngineFailure("failed-precondition", "Proposal is no longer pending")
-            if snapshot.to_dict()["expiresAt"] <= _utcnow():
-                transaction.update(proposal_ref, {"status": "expired"})
-                return {"expired": True}
-            transaction.update(proposal_ref, {"status": "rejected", "rejectedAt": _utcnow()})
-            return {"status": "rejected"}
-        try:
-            result = commit(tx)
-        except Aborted as exc:
-            raise EngineFailure("aborted", "A concurrent decision changed this proposal") from exc
-        if result.get("expired"):
-            raise EngineFailure("failed-precondition", "Proposal expired")
-        return result
+    def reject(self, request):
+        proposal_id = _id(request.get("proposalId") if isinstance(request,dict) else None,"proposalId")
+        ref = self.user.collection("aiProposals").document(proposal_id)
+        snap = ref.get()
+        if not snap.exists: raise EngineFailure("not-found", "Proposal not found")
+        if snap.to_dict()["status"] == "rejected": return {"status":"rejected","alreadyProcessed":True}
+        if snap.to_dict()["status"] != "pending": raise EngineFailure("failed-precondition", "Proposal is no longer pending")
+        ref.update({"status":"rejected","rejectedAt":_utcnow()})
+        return {"status":"rejected"}

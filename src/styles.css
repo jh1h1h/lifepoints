@@ -171,6 +171,9 @@ h3 {
   max-width: 860px;
 }
 .docs-chat-page {
+  max-width: 1180px;
+}
+.docs-chat-page {
   height: calc(100vh - 73px);
   height: calc(100dvh - 73px);
   min-height: 0;
@@ -191,6 +194,109 @@ h3 {
   min-height: 0;
   gap: 12px;
   min-width: 0;
+}
+.docs-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+  gap: 18px;
+  flex: 1;
+  min-height: 0;
+}
+.recent-projects {
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid #dbe4dc;
+  padding-left: 18px;
+}
+.recent-heading,
+.section-card header,
+.section-controls,
+.section-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.recent-heading h2 {
+  margin: 0;
+}
+.notification-badge {
+  display: inline-flex;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 6px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #9b3d48;
+  color: white;
+  font-size: 0.75rem;
+  line-height: 1;
+  margin-left: 5px;
+}
+.sections-list {
+  display: grid;
+  gap: 14px;
+}
+.section-card {
+  background: white;
+  border: 1px solid #dce5dd;
+  border-radius: 14px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+.section-card.is-pinned {
+  border-color: #ad9560;
+}
+.section-card.is-unread {
+  box-shadow: inset 4px 0 #48785a;
+}
+.section-card header small {
+  display: block;
+  color: #657269;
+  margin-top: 3px;
+}
+.section-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+.section-card textarea {
+  width: 100%;
+  resize: vertical;
+}
+.section-controls {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+.section-toolbar {
+  margin: 18px 0 12px;
+  flex-wrap: wrap;
+}
+.section-toolbar label:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.proposal-after pre {
+  white-space: pre-wrap;
+  font: inherit;
+  background: #f4f7f4;
+  padding: 12px;
+  border-radius: 8px;
+}
+.conflict-warning {
+  border: 1px solid #b98545;
+  background: #fff9ed;
+  padding: 12px;
+  border-radius: 10px;
+}
+.conflict-warning blockquote {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid #b98545;
+  white-space: pre-wrap;
 }
 .docs-chat.has-messages {
   grid-template-rows: minmax(0, 1fr) auto;
@@ -454,8 +560,7 @@ h3 {
   font-weight: 700;
   min-width: 160px;
 }
-.docs-list,
-.edit-history {
+.docs-list {
   padding-left: 22px;
 }
 .docs-list li {
@@ -480,28 +585,6 @@ h3 {
 .danger {
   color: #8a2934;
 }
-.edit-history li {
-  border-bottom: 1px solid #e8eee8;
-  padding: 14px 0;
-}
-.edit-history p {
-  margin: 6px 0;
-}
-.delta {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.delta-added {
-  background: #e8f3e8;
-  border-left: 3px solid #49745a;
-  padding: 3px 8px;
-}
-.delta-removed {
-  background: #f8eded;
-  border-left: 3px solid #9b5960;
-  padding: 3px 8px;
-}
 @media (max-width: 700px) {
   .header-inner {
     height: auto;
@@ -516,6 +599,20 @@ h3 {
   }
   .docs-heading {
     flex-wrap: wrap;
+  }
+  .docs-workspace {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .docs-chat {
+    min-height: 70vh;
+  }
+  .recent-projects {
+    overflow: visible;
+    border-left: 0;
+    border-top: 1px solid #dbe4dc;
+    padding: 18px 0 0;
   }
   .docs-heading > button {
     width: 100%;
