@@ -889,6 +889,12 @@ h3 {
   width: min(430px, 100%);
   padding: 26px;
 }
+.docs-section-modal {
+  width: min(640px, 100%);
+}
+.docs-section-modal textarea {
+  min-height: 180px;
+}
 .modal label {
   display: block;
   margin: 15px 0 7px;

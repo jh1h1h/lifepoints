@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Docs } from '../../src/pages/Docs'
 import {
@@ -105,6 +111,26 @@ describe('section-based Docs', () => {
       expect(docsService.mutate).toHaveBeenCalledWith(
         'update_section',
         expect.objectContaining({ content: 'henry studies at harvard' }),
+      ),
+    )
+  })
+  it('adds a section from the detail modal', async () => {
+    render(<Docs path="/docs/friends/friend123" uid="test" />)
+    fireEvent.click(await screen.findByRole('button', { name: 'New section' }))
+    const dialog = screen.getByRole('dialog', {
+      name: 'New section for Henry',
+    })
+    fireEvent.change(within(dialog).getByLabelText('Section text'), {
+      target: { value: 'Henry started a new role' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add section' }))
+    await waitFor(() =>
+      expect(docsService.mutate).toHaveBeenCalledWith(
+        'add_section',
+        expect.objectContaining({
+          entityId: 'friend123',
+          content: 'Henry started a new role',
+        }),
       ),
     )
   })

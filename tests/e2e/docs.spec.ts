@@ -32,8 +32,14 @@ test('shows recent project sections beside chat', async ({ page }) => {
   await page.getByRole('button', { name: 'New project' }).click()
   const form = page.getByRole('form', { name: 'New project' })
   await form.getByLabel('Name').fill('Friendfolio')
-  await form.getByLabel('First section (optional)').fill('Ship the prototype')
   await form.getByRole('button', { name: 'Create' }).click()
+  await page.getByRole('button', { name: 'New section' }).click()
+  const dialog = page.getByRole('dialog', {
+    name: 'New section for Friendfolio',
+  })
+  await dialog.getByLabel('Section text').fill('Ship the prototype')
+  await dialog.getByRole('button', { name: 'Add section' }).click()
+  await expect(dialog).toBeHidden()
   await page.getByRole('link', { name: 'Chat' }).click()
   await expect(
     page

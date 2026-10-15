@@ -387,6 +387,7 @@ function DocDetail({
   const [sort, setSort] = useState<'newest' | 'oldest'>('newest')
   const [prioritizePins, setPrioritizePins] = useState(true)
   const [newText, setNewText] = useState('')
+  const [addingSection, setAddingSection] = useState(false)
   const [editingDetails, setEditingDetails] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
   const [aliasesDraft, setAliasesDraft] = useState('')
@@ -423,6 +424,7 @@ function DocDetail({
         content: newText,
       })
       setNewText('')
+      setAddingSection(false)
       await load()
     } catch (cause) {
       setError(readableDocError(cause))
@@ -512,6 +514,12 @@ function DocDetail({
               )}
             </div>
             <div className="docs-actions">
+              <button
+                className="primary"
+                onClick={() => setAddingSection(true)}
+              >
+                New section
+              </button>
               <button onClick={startDetails}>Edit details</button>
               <button
                 className="danger"
@@ -522,6 +530,57 @@ function DocDetail({
               </button>
             </div>
           </div>
+          {addingSection && (
+            <div
+              className="modal-backdrop"
+              onClick={() => {
+                if (!busy) {
+                  setNewText('')
+                  setAddingSection(false)
+                }
+              }}
+            >
+              <form
+                className="modal card docs-section-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-label={`New section for ${entity.name}`}
+                onClick={(event) => event.stopPropagation()}
+                onSubmit={add}
+              >
+                <h2>New section</h2>
+                <label htmlFor="new-section-content">Section text</label>
+                <textarea
+                  id="new-section-content"
+                  required
+                  rows={7}
+                  maxLength={10000}
+                  value={newText}
+                  onChange={(event) => setNewText(event.target.value)}
+                  placeholder={`Add a thought about ${entity.name}…`}
+                  autoFocus
+                />
+                <div className="modal-actions">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setNewText('')
+                      setAddingSection(false)
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="primary"
+                    disabled={busy || !newText.trim()}
+                  >
+                    {busy ? 'Adding…' : 'Add section'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
           {editingDetails && (
             <form
               className="card docs-panel docs-form"
@@ -554,22 +613,6 @@ function DocDetail({
               </div>
             </form>
           )}
-          <form className="card docs-panel docs-form" onSubmit={add}>
-            <label>
-              New section
-              <textarea
-                required
-                rows={4}
-                maxLength={10000}
-                value={newText}
-                onChange={(event) => setNewText(event.target.value)}
-                placeholder={`Add a thought about ${entity.name}…`}
-              />
-            </label>
-            <button className="primary" disabled={busy || !newText.trim()}>
-              Add section
-            </button>
-          </form>
           <div className="section-toolbar">
             <label>
               Order{' '}
