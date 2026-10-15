@@ -4,11 +4,11 @@ LifePoints has two sections in one React/Firebase site: **Points**, a quiet week
 
 ## Local development
 
-Requirements: Node 22 or newer, Python 3.13, and a Firebase project. Emulator tests also need Java 21.
+Requirements: Node 22 or newer, Python 3.12, and a Firebase project. Emulator tests also need Java 21.
 
 ```bash
 npm install
-python3.13 -m venv functions/venv
+python3.12 -m venv functions/venv
 functions/venv/bin/python -m pip install -r functions/requirements-dev.txt
 cp .env.example .env
 # Fill in the Firebase web app values in .env
