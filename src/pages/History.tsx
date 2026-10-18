@@ -8,7 +8,11 @@ import { buildHistoryRows } from '../utils/history'
 interface Props {
   activities: Activity[]
   remove: (id: string) => Promise<void>
-  editNote: (id: string, note: string) => Promise<void>
+  editNote: (
+    id: string,
+    note: string,
+    addToPreviousWeek?: boolean,
+  ) => Promise<boolean>
   busy: boolean
   now?: Date
 }
@@ -31,6 +35,10 @@ export function History({
     : (rows.at(-1)?.key ?? '')
   const selected = activities.filter(
     (activity) => getWeekKey(new Date(activity.timestamp)) === weekKey,
+  )
+  const activityIds = useMemo(
+    () => new Set(activities.map((activity) => activity.activityId)),
+    [activities],
   )
   return (
     <main className="container page">
@@ -85,6 +93,8 @@ export function History({
           activities={selected}
           onDelete={remove}
           onEditNote={editNote}
+          allActivityIds={activityIds}
+          allowPreviousWeek={weekKey === getWeekKey(now)}
           busy={busy}
         />
       </section>

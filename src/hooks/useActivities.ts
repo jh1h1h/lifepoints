@@ -4,10 +4,11 @@ import {
   TaskLimitReachedError,
   addActivity,
   deleteActivity,
-  editActivityNote,
+  editActivity,
   mergeActivities,
   subscribeActivities,
 } from '../services/activityService'
+import { weeklyTaskUses } from '../utils/taskLimits'
 
 export function useActivities(uid?: string) {
   const [activities, setActivities] = useState<Activity[]>([])
@@ -79,13 +80,36 @@ export function useActivities(uid?: string) {
       setMessage('Activity deleted.')
     }
   }
-  async function editNote(id: string, note: string) {
-    if (!uid) return
-    const done = await run(async () => {
-      await editActivityNote(uid, id, note)
-      return true
-    }, 'Could not save the note. Please try again.')
-    if (done) setMessage('Note saved.')
+  async function editNote(
+    id: string,
+    note: string,
+    addToPreviousWeek = false,
+  ): Promise<boolean> {
+    if (!uid) return false
+    const activity = activities.find((item) => item.activityId === id)
+    if (!activity) return false
+    const previousWeek = new Date(activity.timestamp)
+    previousWeek.setDate(previousWeek.getDate() - 7)
+    const result = await run(
+      () =>
+        editActivity(
+          uid,
+          id,
+          note,
+          addToPreviousWeek,
+          weeklyTaskUses(activities, activity.taskId, previousWeek),
+        ),
+      addToPreviousWeek
+        ? 'Could not add the activity to last week. Please try again.'
+        : 'Could not save the note. Please try again.',
+    )
+    if (result !== undefined)
+      setMessage(
+        result.addedToPreviousWeek
+          ? 'Activity added to last week.'
+          : 'Activity saved.',
+      )
+    return result !== undefined
   }
   async function merge(items: Activity[]) {
     if (!uid) return

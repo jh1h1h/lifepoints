@@ -16,6 +16,18 @@ export class TaskLimitReachedError extends Error {
   }
 }
 
+export function previousWeekCopyId(activityId: string): string {
+  return `previous_week_${activityId}`
+}
+
+function previousWeekTimestamp(timestamp: string): string {
+  const previous = new Date(timestamp)
+  if (!Number.isFinite(previous.getTime()))
+    throw new Error('Invalid activity date.')
+  previous.setDate(previous.getDate() - 7)
+  return previous.toISOString()
+}
+
 function activityCollection(uid: string) {
   if (!db) throw new Error('Firebase is not configured.')
   return collection(db, 'users', uid, 'activities')
@@ -95,15 +107,77 @@ export async function addActivity(
   return activityRef.id
 }
 
-export async function editActivityNote(
+export async function editActivity(
   uid: string,
   activityId: string,
   note: string,
-): Promise<void> {
-  if (!db) throw new Error('Firebase is not configured.')
-  await updateDoc(doc(db, 'users', uid, 'activities', activityId), {
-    note,
-    updatedAt: new Date().toISOString(),
+  addToPreviousWeek = false,
+  observedUses = 0,
+): Promise<{ addedToPreviousWeek: boolean }> {
+  const firestore = db
+  if (!firestore) throw new Error('Firebase is not configured.')
+  const activityRef = doc(firestore, 'users', uid, 'activities', activityId)
+  if (!addToPreviousWeek) {
+    await updateDoc(activityRef, {
+      note,
+      updatedAt: new Date().toISOString(),
+    })
+    return { addedToPreviousWeek: false }
+  }
+  const copyRef = doc(
+    firestore,
+    'users',
+    uid,
+    'activities',
+    previousWeekCopyId(activityId),
+  )
+  return runTransaction(firestore, async (transaction) => {
+    const activitySnapshot = await transaction.get(activityRef)
+    if (!activitySnapshot.exists())
+      throw new Error('This activity was removed.')
+    const copySnapshot = await transaction.get(copyRef)
+    const activity = activitySnapshot.data()
+    const now = new Date().toISOString()
+    if (copySnapshot.exists()) {
+      transaction.update(activityRef, { note, updatedAt: now })
+      return { addedToPreviousWeek: false }
+    }
+    const timestamp = previousWeekTimestamp(activity.timestamp as string)
+    const taskId = activity.taskId as string
+    const taskRef = doc(firestore, 'users', uid, 'tasks', taskId)
+    const taskSnapshot = await transaction.get(taskRef)
+    let usageRef: ReturnType<typeof doc> | undefined
+    let nextUsage: Record<string, unknown> | undefined
+    if (taskSnapshot.exists()) {
+      const limit = taskSnapshot.data().weeklyLimit as number | null | undefined
+      if (limit != null) {
+        const weekKey = getWeekKey(new Date(timestamp))
+        usageRef = doc(
+          firestore,
+          'users',
+          uid,
+          'taskUsage',
+          `${taskId}_${weekKey}`,
+        )
+        const usageSnapshot = await transaction.get(usageRef)
+        const recorded = usageSnapshot.exists()
+          ? Number(usageSnapshot.data().count)
+          : 0
+        const count = Math.max(recorded, observedUses)
+        if (count >= limit) throw new TaskLimitReachedError(limit)
+        nextUsage = { taskId, weekKey, count: count + 1, updatedAt: now }
+      }
+    }
+    transaction.update(activityRef, { note, updatedAt: now })
+    transaction.set(copyRef, {
+      ...activity,
+      timestamp,
+      note,
+      createdAt: now,
+      updatedAt: now,
+    })
+    if (usageRef && nextUsage) transaction.set(usageRef, nextUsage)
+    return { addedToPreviousWeek: true }
   })
 }
 

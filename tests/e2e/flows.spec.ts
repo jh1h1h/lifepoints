@@ -319,6 +319,35 @@ test('deletion updates dashboard and history', async ({ page }) => {
   await expect(page.getByText(`: ${growthTask.points} / 100`)).toBeVisible()
 })
 
+test('adds a current activity to last week without removing it from this week', async ({
+  page,
+}) => {
+  await signIn(page)
+  await page.getByRole('button', { name: taskButtonName }).click()
+  const activity = page.locator('.activity-row').filter({
+    hasText: growthTask.name,
+  })
+  await activity.getByRole('button', { name: 'Edit' }).click()
+  await activity.getByRole('checkbox', { name: 'Add to last week' }).check()
+  await activity.getByRole('button', { name: 'Save' }).click()
+  await expect(activity).toBeVisible()
+  await expect(
+    page.getByLabel(`Weekly score ${growthTask.points} out of 100`),
+  ).toBeVisible()
+  await activity.getByRole('button', { name: 'Edit' }).click()
+  const added = activity.getByRole('checkbox', {
+    name: 'Added to last week',
+  })
+  await expect(added).toBeChecked()
+  await expect(added).toBeDisabled()
+  await activity.getByRole('button', { name: 'Cancel' }).click()
+  await page.getByRole('button', { name: 'History' }).click()
+  await page.getByLabel('Select week').selectOption({ index: 1 })
+  await expect(
+    page.locator('.activity-row').filter({ hasText: growthTask.name }),
+  ).toBeVisible()
+})
+
 test('separates current and earlier weeks', async ({ page }) => {
   await signIn(page)
   const now = new Date()

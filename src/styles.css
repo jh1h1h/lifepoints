@@ -865,12 +865,24 @@ h3 {
 .note-form label {
   font-size: 0.8rem;
 }
-.note-form input {
+.note-form > input {
   padding: 9px;
   border: 1px solid #bdcabe;
   border-radius: 8px;
   min-width: 150px;
   max-width: 100%;
+}
+.note-form .activity-copy-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: #eef3ef;
+}
+.activity-copy-option input {
+  width: auto;
+  margin: 0;
 }
 .note-form button {
   font-size: 0.8rem;

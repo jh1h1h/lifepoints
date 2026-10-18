@@ -63,7 +63,11 @@ interface Props {
     observedUses?: number,
   ) => Promise<boolean>
   remove: (id: string) => Promise<void>
-  editNote: (id: string, note: string) => Promise<void>
+  editNote: (
+    id: string,
+    note: string,
+    addToPreviousWeek?: boolean,
+  ) => Promise<boolean>
   saveTaskNote: (id: string, note: string) => Promise<boolean>
   busy: boolean
   now?: Date
@@ -90,6 +94,10 @@ export function Dashboard({
     () =>
       activities.filter((activity) => belongsToWeek(activity.timestamp, now)),
     [activities, now],
+  )
+  const activityIds = useMemo(
+    () => new Set(activities.map((activity) => activity.activityId)),
+    [activities],
   )
   const scores = useMemo(
     () => getWeeklyCategoryBreakdown(activities, now),
@@ -299,6 +307,8 @@ export function Dashboard({
           activities={current}
           onDelete={remove}
           onEditNote={editNote}
+          allActivityIds={activityIds}
+          allowPreviousWeek
           busy={busy}
         />
       </section>

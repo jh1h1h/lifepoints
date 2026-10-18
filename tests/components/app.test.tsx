@@ -12,6 +12,7 @@ import { Dashboard } from '../../src/pages/Dashboard'
 import { History } from '../../src/pages/History'
 import { Settings } from '../../src/pages/Settings'
 import { TEMPLATE_SEED } from '../../src/data/taskSeeds'
+import { previousWeekCopyId } from '../../src/services/activityService'
 import type { Activity, ActivityInput, Task } from '../../src/types'
 
 const growthSeed = TEMPLATE_SEED.find((task) => task.category === 'growth')
@@ -54,12 +55,26 @@ function TestDashboard({
   async function remove(id: string) {
     setActivities((current) => current.filter((item) => item.activityId !== id))
   }
-  async function editNote(id: string, note: string) {
-    setActivities((current) =>
-      current.map((item) =>
+  async function editNote(id: string, note: string, addToPreviousWeek = false) {
+    setActivities((current) => {
+      const source = current.find((item) => item.activityId === id)
+      const updated = current.map((item) =>
         item.activityId === id ? { ...item, note } : item,
-      ),
-    )
+      )
+      if (!source || !addToPreviousWeek) return updated
+      const timestamp = new Date(source.timestamp)
+      timestamp.setDate(timestamp.getDate() - 7)
+      return [
+        ...updated,
+        {
+          ...source,
+          activityId: previousWeekCopyId(id),
+          timestamp: timestamp.toISOString(),
+          note,
+        },
+      ]
+    })
+    return true
   }
   return (
     <Dashboard
@@ -128,7 +143,7 @@ describe('dashboard', () => {
       screen.getByText(`${Math.min(growthTask.points, 25)} / 25`),
     ).toBeVisible()
     expect(screen.getAllByText(growthTask.name).length).toBeGreaterThan(0)
-    fireEvent.click(screen.getByRole('button', { name: 'Edit note' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
     fireEvent.change(screen.getByLabelText('Note'), {
       target: { value: 'A useful lesson' },
     })
@@ -140,6 +155,24 @@ describe('dashboard', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('Weekly score 0 out of 100')).toBeVisible(),
     )
+  })
+  it('copies an activity to last week while keeping it in recent activity', async () => {
+    render(<TestDashboard />)
+    fireEvent.click(screen.getByRole('button', { name: taskButtonName }))
+    await screen.findByRole('button', { name: 'Edit' })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Add to last week' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Edit' })).toBeVisible(),
+    )
+    const recent = screen.getByText('Recent activity').closest('section')!
+    expect(within(recent).getByText(growthTask.name)).toBeVisible()
+    expect(
+      screen.getByLabelText(
+        `Weekly score ${Math.min(growthTask.points, 25)} out of 100`,
+      ),
+    ).toBeVisible()
   })
   it('saves and edits a task note without logging points', async () => {
     render(<TestDashboard />)
@@ -229,7 +262,7 @@ describe('history and settings', () => {
       <History
         activities={[]}
         remove={async () => {}}
-        editNote={async () => {}}
+        editNote={async () => true}
         busy={false}
       />,
     )
