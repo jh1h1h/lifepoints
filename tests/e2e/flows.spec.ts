@@ -331,20 +331,43 @@ test('adds a current activity to last week without removing it from this week', 
   await activity.getByRole('checkbox', { name: 'Add to last week' }).check()
   await activity.getByRole('button', { name: 'Save' }).click()
   await expect(activity).toBeVisible()
-  await expect(
-    page.getByLabel(`Weekly score ${growthTask.points} out of 100`),
-  ).toBeVisible()
+  await expect(page.getByLabel('Weekly score 0 out of 100')).toBeVisible()
+  await expect(activity).toContainText('(last week)')
   await activity.getByRole('button', { name: 'Edit' }).click()
   const added = activity.getByRole('checkbox', {
-    name: 'Added to last week',
+    name: 'Add to last week',
   })
   await expect(added).toBeChecked()
-  await expect(added).toBeDisabled()
+  await expect(added).toBeEnabled()
   await activity.getByRole('button', { name: 'Cancel' }).click()
   await page.getByRole('button', { name: 'History' }).click()
+  await expect(
+    page
+      .locator('.chart-summary li')
+      .filter({ hasText: `: ${growthTask.points} / 100` }),
+  ).toHaveCount(1)
   await page.getByLabel('Select week').selectOption({ index: 1 })
   await expect(
     page.locator('.activity-row').filter({ hasText: growthTask.name }),
+  ).toBeVisible()
+  await page.reload()
+  await page.getByRole('button', { name: 'Dashboard' }).click()
+  await expect(page.getByLabel('Weekly score 0 out of 100')).toBeVisible()
+  await expect(activity).toBeVisible()
+  await activity.getByRole('button', { name: 'Edit' }).click()
+  await added.uncheck()
+  await activity.getByRole('button', { name: 'Save' }).click()
+  await expect(
+    page.getByLabel(`Weekly score ${growthTask.points} out of 100`),
+  ).toBeVisible()
+  await expect(activity).not.toContainText('(last week)')
+  await page.getByRole('button', { name: 'History' }).click()
+  await page.getByLabel('Select week').selectOption({ index: 1 })
+  await expect(page.locator('.activity-row')).toHaveCount(0)
+  await page.reload()
+  await page.getByRole('button', { name: 'Dashboard' }).click()
+  await expect(
+    page.getByLabel(`Weekly score ${growthTask.points} out of 100`),
   ).toBeVisible()
 })
 

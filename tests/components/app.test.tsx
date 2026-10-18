@@ -168,11 +168,7 @@ describe('dashboard', () => {
     )
     const recent = screen.getByText('Recent activity').closest('section')!
     expect(within(recent).getByText(growthTask.name)).toBeVisible()
-    expect(
-      screen.getByLabelText(
-        `Weekly score ${Math.min(growthTask.points, 25)} out of 100`,
-      ),
-    ).toBeVisible()
+    expect(screen.getByLabelText('Weekly score 0 out of 100')).toBeVisible()
   })
   it('saves and edits a task note without logging points', async () => {
     render(<TestDashboard />)

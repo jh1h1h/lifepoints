@@ -83,7 +83,7 @@ export function useActivities(uid?: string) {
   async function editNote(
     id: string,
     note: string,
-    addToPreviousWeek = false,
+    addToPreviousWeek?: boolean,
   ): Promise<boolean> {
     if (!uid) return false
     const activity = activities.find((item) => item.activityId === id)
@@ -98,6 +98,11 @@ export function useActivities(uid?: string) {
           note,
           addToPreviousWeek,
           weeklyTaskUses(activities, activity.taskId, previousWeek),
+          weeklyTaskUses(
+            activities,
+            activity.taskId,
+            new Date(activity.timestamp),
+          ),
         ),
       addToPreviousWeek
         ? 'Could not add the activity to last week. Please try again.'

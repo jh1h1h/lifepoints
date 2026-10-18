@@ -5,6 +5,7 @@ import {
   type Category,
 } from '../types'
 import { belongsToWeek } from './date'
+import { scoredActivities } from './activity'
 
 export function groupActivitiesByCategory(
   activities: Activity[],
@@ -31,7 +32,7 @@ export function calculateCategoryRawScore(
   activities: Activity[],
   category: Category,
 ): number {
-  const total = activities
+  const total = scoredActivities(activities)
     .filter((activity) => activity.category === category)
     .reduce((sum, activity) => sum + activity.configuredPoints, 0)
   return Number(total.toPrecision(12))
@@ -41,7 +42,7 @@ export function getWeeklyCategoryRawBreakdown(
   activities: Activity[],
   week: Date,
 ): Record<Category, number> {
-  const weekly = activities.filter((activity) =>
+  const weekly = scoredActivities(activities).filter((activity) =>
     belongsToWeek(activity.timestamp, week),
   )
   return Object.fromEntries(
@@ -56,7 +57,7 @@ export function getWeeklyCategoryBreakdown(
   activities: Activity[],
   week: Date,
 ): Record<Category, number> {
-  const weekly = activities.filter((activity) =>
+  const weekly = scoredActivities(activities).filter((activity) =>
     belongsToWeek(activity.timestamp, week),
   )
   return Object.fromEntries(

@@ -32,6 +32,21 @@ function activity(
 }
 
 describe('weekly scoring', () => {
+  it('counts a previous-week copy only in last week while retaining the original', () => {
+    const original = activity()
+    const previousWeek = new Date(week)
+    previousWeek.setDate(previousWeek.getDate() - 7)
+    const copy = {
+      ...original,
+      activityId: `previous_week_${original.activityId}`,
+      timestamp: previousWeek.toISOString(),
+    }
+    const entries = [original, copy]
+    expect(calculateWeeklyScore(entries, week)).toBe(0)
+    expect(getWeeklyCategoryRawBreakdown(entries, week).growth).toBe(0)
+    expect(calculateWeeklyScore(entries, previousWeek)).toBe(5)
+    expect(entries).toContain(original)
+  })
   it('starts at zero and scores a single activity', () => {
     expect(calculateWeeklyScore([], week)).toBe(0)
     expect(calculateCategoryScore([activity()], 'growth')).toBe(5)

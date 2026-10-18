@@ -1,12 +1,13 @@
 import type { Activity, Task } from '../types'
 import { belongsToWeek } from './date'
+import { scoredActivities } from './activity'
 
 export function weeklyTaskUses(
   activities: Activity[],
   taskId: string,
   week = new Date(),
 ): number {
-  return activities.filter(
+  return scoredActivities(activities).filter(
     (activity) =>
       activity.taskId === taskId && belongsToWeek(activity.timestamp, week),
   ).length

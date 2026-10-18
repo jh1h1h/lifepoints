@@ -29,6 +29,18 @@ function activity(timestamp: Date, taskId = task.id): Activity {
 }
 
 describe('task weekly limits', () => {
+  it('releases this week’s use when the activity counts toward last week', () => {
+    const original = activity(week)
+    const previousWeek = new Date(week)
+    previousWeek.setDate(previousWeek.getDate() - 7)
+    const copy = {
+      ...original,
+      activityId: `previous_week_${original.activityId}`,
+      timestamp: previousWeek.toISOString(),
+    }
+    expect(weeklyTaskUses([original, copy], task.id, week)).toBe(0)
+    expect(weeklyTaskUses([original, copy], task.id, previousWeek)).toBe(1)
+  })
   it('defaults to unlimited and counts raw logs rather than capped points', () => {
     const activities = Array.from({ length: 6 }, () => activity(week))
     expect(taskLimitReached(task, activities, week)).toBe(false)

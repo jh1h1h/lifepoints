@@ -8,16 +8,14 @@ import {
 } from 'firebase/firestore'
 import type { Activity, ActivityInput, Task } from '../types'
 import { getWeekKey } from '../utils/date'
+import { previousWeekCopyId } from '../utils/activity'
+export { previousWeekCopyId } from '../utils/activity'
 import { db } from './firebase'
 
 export class TaskLimitReachedError extends Error {
   constructor(limit: number) {
     super(`This task has reached its weekly limit of ${limit}.`)
   }
-}
-
-export function previousWeekCopyId(activityId: string): string {
-  return `previous_week_${activityId}`
 }
 
 function previousWeekTimestamp(timestamp: string): string {
@@ -111,13 +109,14 @@ export async function editActivity(
   uid: string,
   activityId: string,
   note: string,
-  addToPreviousWeek = false,
+  addToPreviousWeek?: boolean,
   observedUses = 0,
+  observedCurrentUses = 0,
 ): Promise<{ addedToPreviousWeek: boolean }> {
   const firestore = db
   if (!firestore) throw new Error('Firebase is not configured.')
   const activityRef = doc(firestore, 'users', uid, 'activities', activityId)
-  if (!addToPreviousWeek) {
+  if (addToPreviousWeek === undefined) {
     await updateDoc(activityRef, {
       note,
       updatedAt: new Date().toISOString(),
@@ -138,7 +137,7 @@ export async function editActivity(
     const copySnapshot = await transaction.get(copyRef)
     const activity = activitySnapshot.data()
     const now = new Date().toISOString()
-    if (copySnapshot.exists()) {
+    if (copySnapshot.exists() === addToPreviousWeek) {
       transaction.update(activityRef, { note, updatedAt: now })
       return { addedToPreviousWeek: false }
     }
@@ -146,6 +145,51 @@ export async function editActivity(
     const taskId = activity.taskId as string
     const taskRef = doc(firestore, 'users', uid, 'tasks', taskId)
     const taskSnapshot = await transaction.get(taskRef)
+    const originalUsageRef = doc(
+      firestore,
+      'users',
+      uid,
+      'taskUsage',
+      `${taskId}_${getWeekKey(new Date(activity.timestamp as string))}`,
+    )
+    const originalUsage = await transaction.get(originalUsageRef)
+    if (!addToPreviousWeek) {
+      const weekKey = getWeekKey(new Date(timestamp))
+      const previousUsageRef = doc(
+        firestore,
+        'users',
+        uid,
+        'taskUsage',
+        `${taskId}_${weekKey}`,
+      )
+      const previousUsage = await transaction.get(previousUsageRef)
+      const limit = taskSnapshot.exists()
+        ? (taskSnapshot.data().weeklyLimit as number | null | undefined)
+        : undefined
+      const count = Math.max(
+        originalUsage.exists() ? Number(originalUsage.data().count) : 0,
+        observedCurrentUses,
+      )
+      if (limit != null && count >= limit)
+        throw new TaskLimitReachedError(limit)
+      transaction.update(activityRef, { note, updatedAt: now })
+      transaction.delete(copyRef)
+      if (originalUsage.exists() || limit != null) {
+        transaction.set(originalUsageRef, {
+          taskId,
+          weekKey: getWeekKey(new Date(activity.timestamp as string)),
+          count: count + 1,
+          updatedAt: now,
+        })
+      }
+      if (previousUsage.exists()) {
+        transaction.update(previousUsageRef, {
+          count: Math.max(0, Number(previousUsage.data().count) - 1),
+          updatedAt: now,
+        })
+      }
+      return { addedToPreviousWeek: false }
+    }
     let usageRef: ReturnType<typeof doc> | undefined
     let nextUsage: Record<string, unknown> | undefined
     if (taskSnapshot.exists()) {
@@ -177,6 +221,12 @@ export async function editActivity(
       updatedAt: now,
     })
     if (usageRef && nextUsage) transaction.set(usageRef, nextUsage)
+    if (originalUsage.exists()) {
+      transaction.update(originalUsageRef, {
+        count: Math.max(0, Number(originalUsage.data().count) - 1),
+        updatedAt: now,
+      })
+    }
     return { addedToPreviousWeek: true }
   })
 }
@@ -201,10 +251,46 @@ export async function deleteActivity(
       `${data.taskId as string}_${weekKey}`,
     )
     const usage = await transaction.get(usageRef)
+    const copy = await transaction.get(
+      doc(
+        firestore,
+        'users',
+        uid,
+        'activities',
+        previousWeekCopyId(activityId),
+      ),
+    )
+    // Removing a previous-week copy makes the retained original count again.
+    const sourceId = activityId.startsWith('previous_week_')
+      ? activityId.slice('previous_week_'.length)
+      : undefined
+    const source = sourceId
+      ? await transaction.get(
+          doc(firestore, 'users', uid, 'activities', sourceId),
+        )
+      : undefined
+    const sourceUsageRef = source?.exists()
+      ? doc(
+          firestore,
+          'users',
+          uid,
+          'taskUsage',
+          `${data.taskId as string}_${getWeekKey(new Date(source.data().timestamp as string))}`,
+        )
+      : undefined
+    const sourceUsage = sourceUsageRef
+      ? await transaction.get(sourceUsageRef)
+      : undefined
     transaction.delete(activityRef)
-    if (usage.exists()) {
+    if (usage.exists() && !copy.exists()) {
       transaction.update(usageRef, {
         count: Math.max(0, Number(usage.data().count) - 1),
+        updatedAt: new Date().toISOString(),
+      })
+    }
+    if (sourceUsageRef && sourceUsage?.exists()) {
+      transaction.update(sourceUsageRef, {
+        count: Number(sourceUsage.data().count) + 1,
         updatedAt: new Date().toISOString(),
       })
     }

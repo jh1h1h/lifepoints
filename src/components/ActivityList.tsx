@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { Activity } from '../types'
 import { CATEGORY_NAMES } from '../types'
-import { previousWeekCopyId } from '../services/activityService'
+import { previousWeekCopyId } from '../utils/activity'
 
 interface Props {
   activities: Activity[]
@@ -41,7 +41,8 @@ export function ActivityList({
               <strong>{activity.taskName}</strong>
               <span>
                 {CATEGORY_NAMES[activity.category]} · +
-                {activity.configuredPoints} ·{' '}
+                {activity.configuredPoints}
+                {alreadyAdded ? ' (last week)' : ''} ·{' '}
                 {new Intl.DateTimeFormat(undefined, {
                   month: 'short',
                   day: 'numeric',
@@ -62,7 +63,7 @@ export function ActivityList({
                     await onEditNote(
                       activity.activityId,
                       draft,
-                      addToPreviousWeek && !alreadyAdded,
+                      allowPreviousWeek ? addToPreviousWeek : undefined,
                     )
                   ) {
                     setEditing(null)
@@ -82,13 +83,13 @@ export function ActivityList({
                   <label className="activity-copy-option">
                     <input
                       type="checkbox"
-                      checked={alreadyAdded || addToPreviousWeek}
-                      disabled={busy || alreadyAdded}
+                      checked={addToPreviousWeek}
+                      disabled={busy}
                       onChange={(event) =>
                         setAddToPreviousWeek(event.target.checked)
                       }
                     />
-                    {alreadyAdded ? 'Added to last week' : 'Add to last week'}
+                    Add to last week
                   </label>
                 )}
                 <button disabled={busy}>Save</button>
@@ -108,7 +109,7 @@ export function ActivityList({
                   disabled={busy}
                   onClick={() => {
                     setDraft(activity.note)
-                    setAddToPreviousWeek(false)
+                    setAddToPreviousWeek(alreadyAdded)
                     setEditing(activity.activityId)
                   }}
                 >
